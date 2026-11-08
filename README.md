@@ -68,6 +68,10 @@ This runs Rust formatting, tests, Clippy, Flutter dependency resolution, formatt
 
 This app lives only under `extensions/senior-meal-preview/` on a dedicated non-submission branch. Keep it out of the coursework submission bundle. No experiment, report, annotation-site, or inference files are changed. Do not copy generated builds, dependency caches, signing files, photos, experiment outputs, or credentials.
 
+## UI design and takeover
+
+Start with [DESIGN.md](DESIGN.md) for the visual system and prioritized next pass, [AGENT_HANDOFF.md](AGENT_HANDOFF.md) for implementation ownership and run instructions, [UI acceptance](docs/UI_ACCEPTANCE.md) for review scenarios, and [design tokens](docs/design-tokens.json) for baseline/proposed values. These distinguish implemented behavior from future proposals and do not claim native or user-study validation.
+
 ## Data handling
 
 No accounts, telemetry, model calls, uploads, database, local preferences storage, or session histories. The client holds choices in memory. The API accepts only predefined meal/change IDs and two preference enums, and does not log request bodies. Requests are capped at 16 KiB. Unknown fields, including photo/health fields, are rejected. API responses use `Cache-Control: no-store`. Browser access is limited to exact HTTP `localhost` / `127.0.0.1` origins; CORS is not authentication.

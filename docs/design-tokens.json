@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "purpose": "Design handoff only; not imported by the app at this baseline.",
+  "baseline_commit": "023aac0ceab7d64fd795345277fec93d086b8dc7",
+  "source": "mobile/lib/main.dart",
+  "units": {"layout": "Flutter logical pixels", "font_size": "sp", "line_height": "multiplier"},
+  "implemented_explicit_values": {
+    "color": {
+      "ink_primary": "#163D34",
+      "background": "#F8F6EF",
+      "text_secondary": "#52655C",
+      "surface": "#FFFFFF",
+      "card_selected": "#EAF0E2",
+      "chip_selected": "#E1EBD7",
+      "notice_surface": "#EEE8D5",
+      "error_surface": "#FBE9E3",
+      "error_text": "#7E211E",
+      "error_icon": "#9C2520",
+      "card_outline_subtle": "#D7DDD1",
+      "chip_outline": "#99A99D",
+      "divider": "#CCD3C7",
+      "progress_inactive": "#DEE4D8",
+      "plate_card_surface": "#EAEDE2"
+    },
+    "typography": {
+      "font_family": "Roboto",
+      "display_small": {"size": 38, "height": 1.12, "weight": 700, "letter_spacing": -1.2},
+      "headline_small": {"size": 27, "height": 1.2, "weight": 700},
+      "title_large": {"size": 22, "height": 1.3, "weight": 700},
+      "title_medium": {"size": 19, "height": 1.4, "weight": 600},
+      "body_large": {"size": 19, "height": 1.5},
+      "body_medium": {"size": 17, "height": 1.45},
+      "label_large": {"size": 18, "weight": 700},
+      "progress": {"size": 14, "weight": 800, "letter_spacing": 1.3}
+    },
+    "layout": {
+      "max_outer_width": 800,
+      "page_padding": {"left": 24, "top": 20, "right": 24, "bottom": 32},
+      "meal_horizontal_min_inner_width": 500,
+      "comparison_columns_min_inner_width": 600,
+      "compact_meal_illustration_height_current": 128,
+      "wide_meal_illustration_width_current": 148,
+      "primary_button_min_height": 58,
+      "outlined_button_min_height": 56,
+      "text_button_min_height": 52,
+      "progress_bar_height": 5
+    },
+    "radius": {"meal_card": 22, "change_card": 18, "plate_card": 24, "notice": 16, "button": 18}
+  },
+  "proposed_not_implemented": {
+    "progress": {"font_size_min": 16, "case": "sentence", "example": "Step 1 of 3 · Choose a meal"},
+    "strong_control_outline": "#718476",
+    "compact_meal_illustration_range": [72, 88],
+    "compact_meal_card_starting_min_height": 120,
+    "touch_target_minimum": 48,
+    "normal_text_contrast_minimum": 4.5,
+    "large_text_and_essential_indicator_contrast_minimum": 3,
+    "text_scaling": "Respect system settings without a global cap; grow and reflow rather than clip.",
+    "motion": "No new motion required; honor reduced-motion settings if introduced."
+  },
+  "cautions": [
+    "Material 3 generated colors, disabled states, painter colors and renderer output are not fully represented here.",
+    "Inner-width breakpoints apply after parent padding; they are not device-width breakpoints.",
+    "Proposed sizes are starting points for testing, not fixed heights at large text scales.",
+    "Color ratios do not establish accessibility validation or nutritional suitability."
+  ]
+}
