@@ -24,6 +24,10 @@ Repository inspection confirmed that SgFood-Edit uses Python/PyTorch, BrushNet-S
 
 This is an investigator/developer prototype, not a participant study, nutrition calculator, food-safety tool, or clinical recommendation system. The meal examples and changes are illustrative, not guideline-backed recommendations. No calories or health outcomes are invented. A soft-texture preference does not establish swallowing safety.
 
+## Mobile build handoff
+
+Use [docs/MOBILE_BUILD.md](docs/MOBILE_BUILD.md) for a fresh-clone setup, exact Android/iOS commands, toolchain versions and current blockers. The Android debug APK was built successfully on 8 November 2026. The iOS simulator build is currently blocked by missing CoreSimulator components in the local Xcode installation, not yet verified. No emulator/device UI run or release distribution is claimed.
+
 ## Start locally
 
 Prerequisites: installed Rust/Cargo and Flutter (tested versions above), plus access to the standard Cargo and pub package registries for the first build.

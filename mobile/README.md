@@ -4,7 +4,9 @@ Local-only meal-change preview prototype, isolated from coursework submission.
 
 ## Run
 
-Start the Rust API from the repository root (see the root README), then:
+For fresh-clone instructions and verified native build status, read [the mobile build guide](../docs/MOBILE_BUILD.md).
+
+Start the Rust API from the extension directory with `cargo run --locked --manifest-path backend/Cargo.toml`, then from this `mobile/` directory:
 
 ```sh
 flutter pub get
@@ -17,7 +19,7 @@ For an Android emulator, the host computer is `10.0.2.2`:
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8787
 ```
 
-The default base URL is `http://127.0.0.1:8787`. An iOS simulator can use that loopback address. Native Android/iOS targets are scaffolded, but require a configured Android SDK or Xcode before a device build. Physical devices cannot use the computer's loopback address; authenticated TLS deployment and deliberate server network configuration are outside this prototype.
+The default base URL is `http://127.0.0.1:8787`. An iOS simulator can use that loopback address. Android debug APK compilation is verified; iOS simulator compilation is blocked on the current Mac by missing Xcode CoreSimulator components. Both targets require their configured native SDKs, and emulator/device UI runs remain unverified. Physical devices cannot use the computer's loopback address; authenticated TLS deployment and deliberate server network configuration are outside this prototype.
 
 Android cleartext HTTP is enabled only in debug/profile manifests to reach the local development API. Release builds require HTTPS. The iOS plist permits local networking and explains the local-server purpose. No broad arbitrary-load exception is configured. Native builds and device permission flows must be validated before distributing this app.
 

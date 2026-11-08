@@ -2,7 +2,7 @@
 
 ## Read first
 
-1. [README.md](README.md): scope, stack and local commands.
+1. [README.md](README.md): scope, stack and local commands. For another machine or native build, also read [docs/MOBILE_BUILD.md](docs/MOBILE_BUILD.md).
 2. [DESIGN.md](DESIGN.md): current UI, proposed visual direction and evidence boundaries.
 3. [docs/UI_ACCEPTANCE.md](docs/UI_ACCEPTANCE.md): scenario matrix and completion checks.
 4. [docs/design-tokens.json](docs/design-tokens.json): implemented explicit tokens and clearly separate proposals.
@@ -50,6 +50,8 @@ From the app directory:
 ./scripts/check.sh
 python3 scripts/smoke.py
 ```
+
+Android debug APK compilation was verified on 8 November 2026; native UI execution is not yet verified. iOS simulator compilation is blocked by the local Xcode installation missing CoreSimulator components. Use docs/MOBILE_BUILD.md for exact platform commands and avoid describing those limits as passed tests.
 
 For local visual work, follow README commands: API at `127.0.0.1:8787`, Flutter web at `127.0.0.1:5173`. The API intentionally does not bind to LAN/public addresses. Use only your own processes and clean them up when done. Recheck interrupted/repeated flows, not just the happy path.
 
