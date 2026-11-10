@@ -243,6 +243,7 @@ class FakeEditor:
 
     def __init__(self) -> None:
         self.specs: list = []
+        self.delay = 0.0
 
     def edit(self, image, mask, spec):
         from dataclasses import asdict
@@ -251,6 +252,10 @@ class FakeEditor:
         from PIL import Image
 
         assert image.size == mask.shape[::-1] and mask.dtype == bool
+        if self.delay:
+            import time
+
+            time.sleep(self.delay)
         self.specs.append(spec)
         arr = np.asarray(image).copy()
         arr[mask] = (120 + 10 * len(self.specs), 90, 50)
@@ -330,6 +335,7 @@ class BuiltinSgeditAdapterTests(unittest.TestCase):
                 "WORKER_GPU_CMD": "",
                 "WORKER_RUN_DIR": "",
                 "WORKER_MAX_ATTEMPTS": "4",
+                "WORKER_TIME_BUDGET_SECS": "0",
             },
         )
         env.start()
@@ -417,6 +423,20 @@ class BuiltinSgeditAdapterTests(unittest.TestCase):
             art = self.run_edit()
         self.assertEqual(art["attempts"], 2)
         self.assertEqual(len(self.editor.specs), 2)
+
+    def test_time_budget_stops_retries_and_returns_best_so_far(self) -> None:
+        self.script[:] = [EDIT_FAIL] * 4
+        self.editor.delay = 0.4
+        run_dir = os.path.join(self.tmp.name, "runs")
+        with mock.patch.dict(os.environ, {"WORKER_TIME_BUDGET_SECS": "0.6", "WORKER_RUN_DIR": run_dir}):
+            art = self.run_edit()
+        self.assertEqual(art["attempts"], 1)
+        self.assertFalse(art["checker_passed"])
+        (run,) = os.listdir(run_dir)
+        with open(os.path.join(run_dir, run, "run.json")) as fh:
+            record = json.load(fh)
+        self.assertTrue(record["stopped_for_time"])
+        self.assertIn("brushnet_sdxl_seg", record["models"]["brushnet"])
 
     def test_unsupported_requests_are_refused_before_any_generation(self) -> None:
         for dish, changes in (

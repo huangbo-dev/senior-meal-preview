@@ -140,6 +140,16 @@ def builtin_fixture_paths(base: Path, dish_id: str) -> tuple[Path, Path]:
     return base / dish_id / "input.png", base / dish_id / f"mask_{source}.png"
 
 
+def _model_identity() -> dict[str, str]:
+    """Checkpoint locations the editor loads (the SDXL path ends in its snapshot revision)."""
+    try:
+        from sgedit import paths
+
+        return {"brushnet": str(paths.BRUSHNET_CKPT), "sdxl": str(paths.SDXL)}
+    except Exception:
+        return {}
+
+
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -312,8 +322,11 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
     try:
         max_attempts = max(1, min(8, int(os.environ.get("WORKER_MAX_ATTEMPTS", "4"))))
         max_side = max(64, min(FIXTURE_SIDE, int(os.environ.get("WORKER_OUTPUT_MAX_SIDE", "768"))))
+        # Seconds allowed for generate+check attempts (0 = no limit). Must stay under the gateway's
+        # MODEL_WORKER_TIMEOUT_MS, or the gateway gives up while the worker is still retrying.
+        time_budget = max(0.0, float(os.environ.get("WORKER_TIME_BUDGET_SECS", "20")))
     except ValueError as exc:
-        raise GpuPipelineUnreadyError(f"Invalid worker integer setting: {exc}") from exc
+        raise GpuPipelineUnreadyError(f"Invalid worker numeric setting: {exc}") from exc
     checker_url = os.environ.get("WORKER_CHECKER_URL", "").strip() or DEFAULT_CHECKER_URL
     run_root = os.environ.get("WORKER_RUN_DIR", "").strip()
 
@@ -335,9 +348,8 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
                 out_dir.mkdir(parents=True)
             else:
                 out_dir = Path(tmp)
-            runner = loop.Runner(
-                get_editor(research), loop.CheckerClient(url=checker_url), out_dir, prompt_set=PROMPT_SET
-            )
+            editor = get_editor(research)  # model load (if not warmed) is outside the time budget
+            runner = loop.Runner(editor, loop.CheckerClient(url=checker_url), out_dir, prompt_set=PROMPT_SET)
             job = {
                 "key": loop.job_key(dish_id, task),
                 "image": image,
@@ -348,13 +360,21 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
             }
             seeds = loop.POLICY["seeds"]
             spec = loop.base_spec(task, source, seeds[0], PROMPT_SET)
+            started = time.monotonic()
             specs, tried = [spec], [runner.candidate(job, spec, "retry0")]
+            durations = [time.monotonic() - started]
+            out_of_time = False
             while not tried[-1]["pass"] and len(tried) < max_attempts:
+                elapsed = time.monotonic() - started
+                if time_budget and elapsed + max(durations) > time_budget:
+                    out_of_time = True  # another attempt would not fit; return the best so far
+                    break
                 spec = loop.next_spec(
                     spec, task, source, tried[-1]["failure"], len(tried), seeds, PROMPT_SET
                 )
                 specs.append(spec)
                 tried.append(runner.candidate(job, spec, f"retry{len(tried)}"))
+                durations.append(time.monotonic() - started - elapsed)
 
             # Same rule as sgedit.results.summarize_result: best score, first wins ties.
             pick = max(range(len(tried)), key=lambda i: tried[i]["score"])
@@ -380,6 +400,10 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
                     "policy_version": policy_version,
                     "prompt_set": PROMPT_SET,
                     "max_attempts": max_attempts,
+                    "time_budget_secs": time_budget,
+                    "stopped_for_time": out_of_time,
+                    "attempt_seconds": [round(d, 2) for d in durations],
+                    "models": _model_identity(),
                     "checker_url": checker_url,
                     "checker_model": checker_model,
                     "attempts": [
@@ -415,7 +439,7 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
             )
         sys.stderr.write(
             f"[gpu-worker] {dish_id}/{task}: attempts={len(tried)} selected={selected['tag']} "
-            f"checker_passed={bool(selected['pass'])}\n"
+            f"checker_passed={bool(selected['pass'])} stopped_for_time={out_of_time}\n"
         )
         return {
             "provider": "tailscale-gpu-worker",
@@ -570,6 +594,7 @@ def main() -> None:
     parser.add_argument(
         "--warm",
         action="store_true",
+        default=os.environ.get("WORKER_WARM", "").strip().lower() in ("1", "true", "yes"),
         help="In gpu mode, load the sgedit editor before listening (exits if it cannot load).",
     )
     args = parser.parse_args()

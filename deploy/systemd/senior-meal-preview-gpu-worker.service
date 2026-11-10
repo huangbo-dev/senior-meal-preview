@@ -9,7 +9,8 @@ User=mealworker
 Group=mealworker
 EnvironmentFile=/etc/senior-meal-preview/gpu-worker.env
 WorkingDirectory=/opt/senior-meal-preview/gpu-worker
-ExecStart=/usr/bin/python3 /opt/senior-meal-preview/gpu-worker/gpu_worker.py
+# WORKER_PYTHON (in the env file) selects the interpreter; gpu mode needs the BrushNet environment's Python.
+ExecStart=/bin/sh -c 'exec "$${WORKER_PYTHON:-/usr/bin/python3}" /opt/senior-meal-preview/gpu-worker/gpu_worker.py'
 Restart=on-failure
 RestartSec=5
 
@@ -19,6 +20,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 RestrictSUIDSGID=true
+# The service user needs read access to the sgedit checkout, fixtures, weights and model caches.
+# If WORKER_RUN_DIR is set, allow writes to it in a drop-in:  ReadWritePaths=/var/lib/senior-meal-preview/runs
 
 [Install]
 WantedBy=multi-user.target
