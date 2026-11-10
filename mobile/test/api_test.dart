@@ -10,6 +10,34 @@ import 'package:senior_meal_preview/models.dart';
 import 'fixtures.dart';
 
 void main() {
+  test('web defaults to page origin without retaining route or query', () {
+    expect(
+      resolveApiBaseUrl(
+        '',
+        Uri.parse('https://preview.example.org/meal?x=1#step'),
+      ),
+      'https://preview.example.org',
+    );
+    expect(
+      resolveApiBaseUrl('', Uri.parse('http://localhost:5173/')),
+      'http://localhost:5173',
+    );
+  });
+
+  test('explicit API origin wins and native development stays on loopback', () {
+    expect(
+      resolveApiBaseUrl(
+        ' https://api.example.org/ ',
+        Uri.parse('https://app.example.org'),
+      ),
+      'https://api.example.org',
+    );
+    expect(
+      resolveApiBaseUrl('', Uri.parse('file:///app')),
+      'http://127.0.0.1:8787',
+    );
+  });
+
   test(
     'catalog uses the configured local endpoint and decodes schema',
     () async {
@@ -121,7 +149,7 @@ void main() {
         isA<ApiException>().having(
           (e) => e.message,
           'message',
-          contains('Start the Rust API'),
+          contains('Check your connection'),
         ),
       ),
     );

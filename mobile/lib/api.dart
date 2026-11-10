@@ -34,6 +34,19 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Resolves an explicit server, the web page origin, or the native local default.
+///
+/// Web builds without API_BASE_URL can move between domains without rebuilding.
+String resolveApiBaseUrl(String configured, Uri pageUri) {
+  if (configured.trim().isNotEmpty) {
+    return configured.trim().replaceFirst(RegExp(r'/+$'), '');
+  }
+  if (['http', 'https'].contains(pageUri.scheme) && pageUri.host.isNotEmpty) {
+    return pageUri.origin;
+  }
+  return 'http://127.0.0.1:8787';
+}
+
 /// Production [MealApi] backed by `package:http`.
 class HttpMealApi implements MealApi {
   /// Creates an [HttpMealApi] configured via `--dart-define=API_BASE_URL` and
@@ -41,12 +54,12 @@ class HttpMealApi implements MealApi {
   HttpMealApi({
     String baseUrl = const String.fromEnvironment(
       'API_BASE_URL',
-      defaultValue: 'http://127.0.0.1:8787',
+      defaultValue: '',
     ),
     String authToken = const String.fromEnvironment('API_AUTH_TOKEN'),
     http.Client? client,
     this.timeout = const Duration(seconds: 28),
-  }) : _baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
+  }) : _baseUrl = resolveApiBaseUrl(baseUrl, Uri.base),
        _authToken = authToken.trim(),
        _client = client ?? http.Client();
 
@@ -125,19 +138,19 @@ class HttpMealApi implements MealApi {
       rethrow;
     } on TimeoutException {
       throw const ApiException(
-        'The local service took too long. Check that it is running, then try again.',
+        'The service took too long. Check that it is running, then try again.',
       );
     } on http.ClientException {
       throw const ApiException(
-        'Cannot reach the local service. Start the Rust API and check the API address, then try again.',
+        'Cannot reach the service. Check your connection and the API address, then try again.',
       );
     } on FormatException {
       throw const ApiException(
-        'The local service returned an unreadable response. Check that the API versions match.',
+        'The service returned an unreadable response. Check that the API versions match.',
       );
     } on TypeError {
       throw const ApiException(
-        'The local service returned an unexpected response. Check that the API versions match.',
+        'The service returned an unexpected response. Check that the API versions match.',
       );
     }
   }
@@ -157,8 +170,8 @@ class HttpMealApi implements MealApi {
       // Fall through to a status-based message.
     }
     return response.statusCode == 408
-        ? 'The local service took too long. Check that it is running, then try again.'
-        : 'The local service could not complete this request. Please try again.';
+        ? 'The service took too long. Check that it is running, then try again.'
+        : 'The service could not complete this request. Please try again.';
   }
 
   @override

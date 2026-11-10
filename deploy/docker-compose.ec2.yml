@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - DOMAIN=${DOMAIN:-mealpreview.example.com}
+      - DOMAIN=${DOMAIN:?Set DOMAIN to your chosen hostname}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../mobile/build/web:/var/www/senior-meal-preview:ro

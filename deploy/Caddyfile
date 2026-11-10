@@ -1,6 +1,5 @@
-# Caddy HTTPS reverse proxy for EC2 deployment.
-# Replace {$DOMAIN:mealpreview.example.com} with your EC2 DNS name via the DOMAIN env var.
-{$DOMAIN:mealpreview.example.com} {
+# Caddy HTTPS reverse proxy. Set DOMAIN to the chosen hostname before starting.
+{$DOMAIN} {
 	encode zstd gzip
 
 	header {

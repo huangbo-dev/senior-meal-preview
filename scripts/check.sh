@@ -11,4 +11,4 @@ flutter pub get
 dart format --output=none --set-exit-if-changed lib test tool
 flutter analyze --fatal-infos
 flutter test
-flutter build web --release --no-web-resources-cdn --dart-define=API_BASE_URL=http://127.0.0.1:8787
+flutter build web --release --no-web-resources-cdn

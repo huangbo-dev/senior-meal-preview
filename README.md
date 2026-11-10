@@ -58,6 +58,10 @@ flutter run -d chrome --web-hostname=127.0.0.1 --web-port=5173 \
 
 For an Android emulator on the same development machine, use `--dart-define=API_BASE_URL=http://10.0.2.2:8787`. For an iOS simulator, use the default loopback URL (`http://127.0.0.1:8787`). See [docs/MOBILE_BUILD.md](docs/MOBILE_BUILD.md) for verified Android APK and iOS Simulator (`iPhone 17 Pro`, iOS 26.5) build instructions.
 
+## Choose hosting and domain later
+
+See [docs/HOSTING_READINESS.md](docs/HOSTING_READINESS.md) for the provider-neutral configuration contract and remaining launch decisions. Web builds default to the serving origin; native builds use the configured API URL. The existing EC2 kit is an option, not a selected server.
+
 ## EC2 + Tailscale GPU deployment
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the complete architecture, SSRF/IMDS security controls, `systemd` services, Docker Compose + Caddy TLS setup, Tailscale ACL policy (`deploy/tailscale-acl.hujson`), and the 5-phase **Next-Week Rollout Schedule & Cutover Runbook**.

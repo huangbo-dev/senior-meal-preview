@@ -48,4 +48,4 @@ python3 scripts/smoke.py
 echo "==> [5/5] Checking git diff hygiene..."
 git diff --check
 
-echo "==> Pre-deployment verification PASSED. Ready for EC2 + Tailscale GPU rollout."
+echo "==> Local verification PASSED. Server, DNS, TLS, access controls and real GPU readiness still require deployment validation."

@@ -53,3 +53,11 @@ iOS simulator debug compilation (`flutter build ios --simulator --debug --dart-d
 - Repository-wide Python/GPU tests: no existing pipeline files were changed, and these checks do not start the project's model services.
 
 These limitations are deliberate prototype boundaries, not successful tests. The app is not a coursework submission or a participant-data collection tool.
+
+## 2026-11-10: Deferred server/domain readiness
+
+On hb-mac, branch `app/senior-meal-preview`, ran `./deploy/predeploy-check.sh` after the API base URL changes: PASS (exit 0). Rust formatting, 19 integration tests, Clippy, 3 Python worker tests, Dart formatting, Flutter analysis, all 42 Flutter tests, web release build, Rust release build and live Rust/Dart dual-mode smoke checks passed. The worker used dry-run fixtures, not real inference. Added two regression tests for same-origin web resolution, route/query removal, explicit override and native loopback fallback.
+
+`git diff --check`, shell syntax checks and ignored-secret-path checks passed. Compose configuration parsed with the checked-in example env file substituted in memory and DOMAIN set; missing DOMAIN correctly fails interpolation. Actual host configuration remains absent by design. Caddy runtime/TLS, production networking and physical-device/browser walkthroughs were not tested in this pass. Web build emitted a non-fatal Cupertino font-family warning; build succeeded.
+
+No deployment, DNS change, domain registration, credentials generation, commit or push performed. See `HOSTING_READINESS.md` for open launch decisions.

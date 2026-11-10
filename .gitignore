@@ -32,3 +32,6 @@ mobile/ios/Runner/GeneratedPluginRegistrant.*
 !mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/*.png
 !mobile/web/favicon.png
 !mobile/web/icons/*.png
+
+# Operator credentials copied from deployment templates.
+deploy/env/*.env

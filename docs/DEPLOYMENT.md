@@ -2,6 +2,8 @@
 
 This guide explains how to deploy the **Senior Meal Preview** Rust API gateway on an **AWS EC2** instance while routing optional GPU model requests over a private **Tailscale** mesh network (`tailscale0`) to a separate GPU machine.
 
+> Hosting and domain are not selected. See [HOSTING_READINESS.md](HOSTING_READINESS.md) first. This is an optional EC2 recipe, not authorization to deploy or a committed calendar. Shared client tokens in compiled apps are extractable; use a proper access gateway/session design before public GPU access. Never embed MODEL_WORKER_TOKEN in a client.
+
 ## 1. Topology and Security Boundary
 
 ```text
@@ -113,9 +115,9 @@ From `extensions/senior-meal-preview/mobile/`:
 
 ```sh
 # Web bundle served by Caddy on EC2
-flutter build web --release --no-web-resources-cdn \
-  --dart-define=API_BASE_URL=https://mealpreview.example.com \
-  --dart-define=API_AUTH_TOKEN=<client-bearer-token>
+flutter build web --release --no-web-resources-cdn
+# Defaults to the serving origin. For a private shared-token demo only,
+# add API_AUTH_TOKEN matching the backend (extractable from the bundle).
 
 # Android APK pointing to EC2 HTTPS endpoint
 flutter build apk --release \
