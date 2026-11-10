@@ -1,0 +1,27 @@
+[Unit]
+Description=Senior Meal Preview Rust API Gateway (EC2)
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=mealpreview
+Group=mealpreview
+EnvironmentFile=/etc/senior-meal-preview/backend.env
+ExecStart=/opt/senior-meal-preview/bin/senior-meal-preview
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

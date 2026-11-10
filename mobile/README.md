@@ -1,12 +1,12 @@
 # A little change · Flutter client
 
-Local-only meal-change preview prototype, isolated from coursework submission.
+Accessible meal-change preview client for Android, iOS, and Web, isolated from the CE7454 coursework submission.
 
-## Run
+## Run locally
 
 For fresh-clone instructions and verified native build status, read [the mobile build guide](../docs/MOBILE_BUILD.md).
 
-Start the Rust API from the extension directory with `cargo run --locked --manifest-path backend/Cargo.toml`, then from this `mobile/` directory:
+Start the Rust API from `extensions/senior-meal-preview/` with `cargo run --locked --manifest-path backend/Cargo.toml`, then from this `mobile/` directory:
 
 ```sh
 flutter pub get
@@ -19,43 +19,42 @@ For an Android emulator, the host computer is `10.0.2.2`:
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8787
 ```
 
-The default base URL is `http://127.0.0.1:8787`. An iOS simulator can use that loopback address. Android debug APK compilation is verified; iOS simulator compilation is blocked on the current Mac by missing Xcode CoreSimulator components. Both targets require their configured native SDKs, and emulator/device UI runs remain unverified. Physical devices cannot use the computer's loopback address; authenticated TLS deployment and deliberate server network configuration are outside this prototype.
+For an EC2 HTTPS deployment with Bearer authentication:
 
-Android cleartext HTTP is enabled only in debug/profile manifests to reach the local development API. Release builds require HTTPS. The iOS plist permits local networking and explains the local-server purpose. No broad arbitrary-load exception is configured. Native builds and device permission flows must be validated before distributing this app.
+```sh
+flutter build apk --release \
+  --dart-define=API_BASE_URL=https://mealpreview.example.com \
+  --dart-define=API_AUTH_TOKEN=<client-bearer-token>
+```
 
 ## Checks
 
 ```sh
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
+dart format --output=none --set-exit-if-changed lib test tool
+flutter analyze --fatal-infos
 flutter test
-flutter build web --dart-define=API_BASE_URL=http://127.0.0.1:8787 --no-web-resources-cdn
+flutter build web --release --dart-define=API_BASE_URL=http://127.0.0.1:8787 --no-web-resources-cdn
 ```
 
-The web build bundles its Flutter renderer and licensed Roboto fonts rather than depending on runtime CDNs. The custom bootstrap keeps renderer/fallback-font URLs local. A development Content Security Policy restricts network connections to the app origin and loopback, with WebAssembly and dev-loader allowances. The English demo does not bundle extra-language fallback fonts; adding languages requires bundling the relevant fonts rather than enabling a remote CDN. Serve the build locally on an API-allowed origin (for example `http://localhost:5173` or `http://127.0.0.1:5173`). Do not open index.html directly from the filesystem. There is no offline data fallback or registered service worker.
+Static analysis enforces `strict-casts`, `strict-inference`, `strict-raw-types`, and `comment_references` via [`analysis_options.yaml`](analysis_options.yaml). The web build bundles its Flutter renderer and licensed `Roboto` fonts locally (`assets/fonts/`) rather than depending on runtime CDNs.
 
-## Behavior and scope
+## Architecture and UI modules
 
-- Fetches the dish/change catalog from `GET /api/v1/catalog`.
-- Lets the user select one dish and one or two compatible serving changes.
-- Sends only IDs and optional texture/flavour requests to `POST /api/v1/preview`.
-- Shows symbolic original/requested plate drawings, explicit simulated labels and text targets.
-- Keeps choices only in memory. No login, telemetry, photos, camera, image upload, cloud service, dietary profile or persistence.
-- Does not generate model images, calculate nutrition, verify allergens/texture or establish clinical safety. Soft/mild preferences remain requests only.
-- Prevents repeated submits; late responses after Back or Start over are ignored. Errors retain choices and offer retry rather than pretending the server succeeded.
-- Large controls, high-contrast text, screen-reader labels and scrollable layouts support 200% text scaling. Automated accessibility checks are not a substitute for testing with older adults and assistive technologies.
-
-Tests use an injected fake API and HTTP mock client; they do not contact a cloud service or model. The backend contract is versioned and unknown modes are rejected.
+- [`lib/theme.dart`](lib/theme.dart): `AppColors`, `AppRadius`, `AppLayout`, `AppTypography`, and `buildAppTheme()`.
+- [`lib/widgets.dart`](lib/widgets.dart): `NoticeCard`, `StepProgress`, `StepHeading`, `SectionHeading`, `MealCard`, `ChangeOption`, `PreferenceGroup`, `RequestSummary`, `PlateCard`, and `GpuPreviewCard`.
+- [`lib/plate.dart`](lib/plate.dart): `PlateIllustration` custom painter with distinct ceramic rims, broth/rice wells, and protein/vegetable shapes.
+- [`lib/models.dart`](lib/models.dart): Immutable domain models (`Dish`, `MealChange`, `SelectionRules`, `CatalogCapabilities`, `Catalog`, `MealPreferences`, `EditTarget`, `GpuArtifact`, `MealPreview`) using Dart 3 pattern matching for strict JSON validation.
+- [`lib/api.dart`](lib/api.dart): `MealApi` interface and `HttpMealApi` implementation supporting `API_BASE_URL`, `API_AUTH_TOKEN`, and `renderMode`.
+- [`lib/main.dart`](lib/main.dart): `MealPreviewApp` and 3-step `MealFlow` state machine with request-version guards and programmatic focus transitions.
 
 ## Real API smoke check
 
-With the Rust service already running:
+With the Rust service running:
 
 ```sh
-dart run tool/smoke_api.dart
-# Optional: API_BASE_URL=http://127.0.0.1:8787 dart run tool/smoke_api.dart
+dart run tool/smoke_api.dart http://127.0.0.1:8787
+# Or with Tailscale GPU worker enabled:
+dart run tool/smoke_api.dart http://127.0.0.1:8787 --expect-gpu
 ```
 
-This uses the production Dart API client for catalog, preview/preferences, unknown-dish rejection and incompatible-change rejection. It does not start or stop the server.
-
-Roboto is bundled from the installed Flutter SDK material-font artifacts under Apache 2.0. Its license is included at `assets/fonts/Roboto_LICENSE.txt` and in the built app assets.
+Roboto is bundled from the installed Flutter SDK material-font artifacts under Apache 2.0 (`assets/fonts/Roboto_LICENSE.txt`).

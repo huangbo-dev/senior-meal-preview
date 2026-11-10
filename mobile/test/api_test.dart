@@ -163,7 +163,7 @@ void main() {
 
   test('empty or duplicate catalogs are rejected', () {
     expect(
-      () => Catalog.fromJson({...catalogJson, 'dishes': []}),
+      () => Catalog.fromJson({...catalogJson, 'dishes': <Object>[]}),
       throwsFormatException,
     );
     expect(
@@ -201,4 +201,67 @@ void main() {
       api.close();
     }
   });
+
+  test('catalog decodes selection rules and supports legacy v1 catalogs', () {
+    final decoded = Catalog.fromJson(catalogJson);
+    expect(decoded.selection.minChanges, 1);
+    expect(decoded.selection.maxChanges, 2);
+    expect(decoded.selection.maxFor(1), 1);
+    expect(decoded.selection.maxFor(3), 2);
+    expect(decoded.changesFor('fish_soup').map((c) => c.id), [
+      'extra_vegetables',
+    ]);
+
+    final legacyJson = Map<String, dynamic>.of(catalogJson)
+      ..remove('selection');
+    final legacy = Catalog.fromJson(legacyJson);
+    expect(legacy.selection.minChanges, 1);
+    expect(legacy.selection.maxChanges, 2);
+
+    for (final invalidSelection in [
+      {'min_changes': 0, 'max_changes': 2},
+      {'min_changes': 2, 'max_changes': 1},
+      {'min_changes': 1, 'max_changes': 3},
+    ]) {
+      expect(
+        () => Catalog.fromJson({...catalogJson, 'selection': invalidSelection}),
+        throwsFormatException,
+      );
+    }
+  });
+
+  test(
+    'non-JSON error responses report service errors rather than schema mismatch',
+    () async {
+      final timeoutApi = HttpMealApi(
+        client: MockClient((_) async => http.Response('', 408)),
+      );
+      addTearDown(timeoutApi.close);
+      await expectLater(
+        timeoutApi.fetchCatalog(),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('took too long'),
+          ),
+        ),
+      );
+
+      final errorApi = HttpMealApi(
+        client: MockClient((_) async => http.Response('Bad gateway', 502)),
+      );
+      addTearDown(errorApi.close);
+      await expectLater(
+        errorApi.fetchCatalog(),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('could not complete'),
+          ),
+        ),
+      );
+    },
+  );
 }

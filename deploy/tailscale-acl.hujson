@@ -1,0 +1,17 @@
+// Example Tailscale ACL snippet for isolating the EC2 gateway and GPU worker.
+// Apply in the Tailscale Admin Console -> Access Controls.
+{
+	"tagOwners": {
+		"tag:ec2-meal-gateway": ["autogroup:admin"],
+		"tag:gpu-meal-worker":  ["autogroup:admin"],
+	},
+	"acls": [
+		// Allow the EC2 Rust API gateway to reach ONLY TCP port 8790 on the GPU worker.
+		// No SSH (22) or reverse connections from the GPU worker to EC2 are permitted.
+		{
+			"action": "accept",
+			"src":    ["tag:ec2-meal-gateway"],
+			"dst":    ["tag:gpu-meal-worker:8790"],
+		},
+	],
+}

@@ -6,11 +6,11 @@ This is the independent **non-submission** app extension on `app/senior-meal-pre
 
 On 8 November 2026:
 
-- Rust format, 11 API tests and Clippy passed.
-- Dart format, static analysis, 20 unit/widget tests and release web build passed.
+- Rust format, 15 API tests and Clippy passed.
+- Dart format, static analysis, 25 unit/widget tests and release web build passed.
 - Production Dart client against the live Rust API passed.
-- **Android debug APK compiled successfully**, including from a separate fresh GitHub clone using the installed SDK/dependency caches. No emulator/device UI run was performed.
-- **iOS simulator build is blocked on the checked Mac.** Xcode 27.2 is installed but its required CoreSimulator framework is missing. The app has not yet passed an iOS build.
+- **Android debug APK compiled successfully**, including from a separate fresh GitHub clone using the installed SDK/dependency caches. No interactive Android emulator/device UI run was performed.
+- **iOS simulator debug app compiled and launched** on `iPhone 17 Pro` (iOS 26.5, Xcode 27.2) after updating `IPHONEOS_DEPLOYMENT_TARGET` to `15.0`.
 - No signing, store submission, remote deployment or physical-phone networking is configured or validated.
 
 Full evidence and limits: [TESTING.md](TESTING.md).
@@ -18,9 +18,9 @@ Full evidence and limits: [TESTING.md](TESTING.md).
 ## Stack and toolchain
 
 - Mobile/UI: Flutter **3.44.8**, Dart **3.12.2**, Material widgets, package `http`.
-- Backend: Rust/Cargo **1.98.1**, Axum **0.8**, Tokio **1**, Serde **1**, tower-http **0.6**. Stateless JSON HTTP on loopback; no database.
+- Backend: Rust/Cargo **1.98.1**, Axum **0.8**, Tokio **1**, Serde **1**, tower-http **0.6** (`cors`, `timeout`). Stateless JSON HTTP on loopback; no database.
 - Android: Gradle **9.1.0**, Android Gradle Plugin **9.0.1**, Kotlin plugin **2.3.20**. With the tested Flutter SDK: compile/target API **36**, minimum API **24**, build-tools **36.0.0**, NDK **28.2.13676358**. The successful build used Android Studio's bundled OpenJDK **25.0.2**. Java/Kotlin bytecode target is 17; that is not the same as the JDK running Gradle.
-- iOS: Swift host project with Xcode; Xcode **27.2** was present on the checked Mac, but simulator components need setup before a successful build can be claimed.
+- iOS: Swift host project with Xcode **27.2** (`IPHONEOS_DEPLOYMENT_TARGET = 15.0`), verified on the iOS 26.5 simulator runtime.
 - Dependency resolution is recorded in `backend/Cargo.lock` and `mobile/pubspec.lock`. Use the tested Flutter release first. New SDK versions need their own verification.
 
 The separate research code remains Python/PyTorch with BrushNet-SDXL and a Qwen checker. The app does not invoke those models. Meal previews are explicitly simulated, not AI-edited photos or nutrition advice.
@@ -81,15 +81,9 @@ flutter run -d <android-device-id> \
 
 Replace `<android-device-id>` with an actual ID from `flutter devices`. `10.0.2.2` addresses the host machine from the standard Android emulator. It is not the backend address for a physical phone. Debug/profile manifests allow local HTTP. Release builds require HTTPS, and their scaffold signing uses the debug key; they are **not distribution-ready**.
 
-## 4. iOS simulator, after completing Xcode setup
+## 4. iOS simulator
 
-macOS and a working full Xcode installation are required. On the checked Mac, the attempt failed because this file is absent:
-
-```text
-/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/CoreSimulator
-```
-
-Open Xcode and complete its first-launch component installation, review any agreements, and install an iOS simulator runtime if needed. The Xcode error also suggests `xcodebuild -runFirstLaunch`; that is a machine-setup action, not an app-source fix. Recheck the toolchain after setup:
+macOS and a working full Xcode installation with an iOS simulator runtime are required. Recheck the toolchain:
 
 ```sh
 xcodebuild -version
@@ -109,7 +103,7 @@ flutter run -d <ios-simulator-id> \
   --dart-define=API_BASE_URL=http://127.0.0.1:8787
 ```
 
-Replace `<ios-simulator-id>` with the actual simulator ID. These commands are the next verification steps, not a claim they have passed. Simulator builds do not need App Store signing. Physical-device/archive builds require deliberate signing and networking setup and are outside this handoff.
+Replace `<ios-simulator-id>` with the actual simulator ID. Simulator builds do not need App Store signing. Physical-device/archive builds require deliberate signing and networking setup and are outside this handoff.
 
 ## 5. Regression checks
 
@@ -124,4 +118,4 @@ git status --short
 
 `check.sh` covers Rust, Dart/Flutter tests and the web build. It does **not** build either native platform. Use the Android/iOS commands above separately and record passed, failed and untested stages honestly. There is no repository CI workflow for this branch at this handoff; these are local results.
 
-Keep generated APKs/apps, dependency caches, signing material, credentials, photos and experiment outputs out of Git. See [AGENT_HANDOFF.md](../AGENT_HANDOFF.md) for UI ownership and [UI_ACCEPTANCE.md](UI_ACCEPTANCE.md) for behavior checks after a native device can run.
+Keep generated APKs/apps, dependency caches, signing material, credentials, photos and experiment outputs out of Git. See [AGENT_HANDOFF.md](../AGENT_HANDOFF.md) for UI ownership and [UI_ACCEPTANCE.md](UI_ACCEPTANCE.md) for behavior checks.

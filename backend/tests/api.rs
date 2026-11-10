@@ -273,3 +273,313 @@ async fn repeated_requests_are_deterministic_and_do_not_create_records() {
     let (status, _) = call(Method::GET, "/api/v1/history", Value::Null).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn catalog_publishes_the_enforced_selection_limits() {
+    let (_, catalog) = call(Method::GET, "/api/v1/catalog", Value::Null).await;
+    assert_eq!(
+        catalog["selection"],
+        json!({"min_changes": senior_meal_preview::MIN_CHANGES, "max_changes": senior_meal_preview::MAX_CHANGES})
+    );
+    assert_eq!(
+        catalog["selection"],
+        json!({"min_changes":1,"max_changes":2})
+    );
+}
+
+#[tokio::test]
+async fn catalog_is_internally_consistent() {
+    let (_, catalog) = call(Method::GET, "/api/v1/catalog", Value::Null).await;
+    let dish_ids: Vec<&str> = catalog["dishes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|dish| dish["id"].as_str().unwrap())
+        .collect();
+    let change_ids: Vec<&str> = catalog["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|change| change["id"].as_str().unwrap())
+        .collect();
+    for (index, id) in dish_ids.iter().enumerate() {
+        assert!(!dish_ids[..index].contains(id), "duplicate dish {id}");
+    }
+    for (index, id) in change_ids.iter().enumerate() {
+        assert!(!change_ids[..index].contains(id), "duplicate change {id}");
+    }
+    for change in catalog["changes"].as_array().unwrap() {
+        let compatible = change["dish_ids"].as_array().unwrap();
+        assert!(!compatible.is_empty(), "{} has no dishes", change["id"]);
+        for dish_id in compatible {
+            assert!(
+                dish_ids.contains(&dish_id.as_str().unwrap()),
+                "{} references unknown dish {dish_id}",
+                change["id"]
+            );
+        }
+    }
+    for dish_id in &dish_ids {
+        assert!(
+            catalog["changes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|change| change["dish_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|id| id == dish_id)),
+            "{dish_id} has no compatible change"
+        );
+    }
+}
+
+#[tokio::test]
+async fn duplicates_are_reported_before_unknown_or_incompatible_ids() {
+    for body in [
+        json!({"dish_id":"chicken_rice","change_ids":["magic","magic"]}),
+        json!({"dish_id":"fish_soup","change_ids":["brown_rice","brown_rice"]}),
+    ] {
+        let (status, value) = call(Method::POST, "/api/v1/preview", body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"]["code"], "duplicate_change");
+    }
+}
+
+/// A request body that never delivers data, standing in for a stalled client.
+struct StalledBody;
+
+impl axum::body::HttpBody for StalledBody {
+    type Data = axum::body::Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        std::task::Poll::Pending
+    }
+}
+
+#[tokio::test]
+async fn stalled_requests_time_out_with_a_structured_error() {
+    let response = senior_meal_preview::app_with_timeout(std::time::Duration::from_millis(50))
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::new(StalledBody))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let value: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["error"]["code"], "timeout");
+}
+
+#[test]
+fn tailscale_worker_url_validation_blocks_ssrf_and_imds() {
+    use senior_meal_preview::worker::{WorkerTransport, validate_worker_url};
+
+    let ts_ip = validate_worker_url("http://100.101.102.103:8790").unwrap();
+    assert_eq!(ts_ip.transport, WorkerTransport::Tailscale);
+    assert_eq!(ts_ip.port, 8790);
+
+    let ts_dns = validate_worker_url("http://gpu-box.tail1234.ts.net:8790/prefix/").unwrap();
+    assert_eq!(ts_dns.transport, WorkerTransport::Tailscale);
+    assert_eq!(ts_dns.path_prefix, "/prefix");
+
+    let ts_v6 = validate_worker_url("http://[fd7a:115c:a1e0::1234]:8790").unwrap();
+    assert_eq!(ts_v6.transport, WorkerTransport::Tailscale);
+
+    let lo = validate_worker_url("http://127.0.0.1:8790").unwrap();
+    assert_eq!(lo.transport, WorkerTransport::Loopback);
+
+    // Block EC2 IMDS, RFC1918 LAN, non-Tailscale 100.x, public domains, and credentials.
+    for forbidden in [
+        "http://169.254.169.254/latest/meta-data",
+        "http://10.0.0.12:8790",
+        "http://192.168.1.10:8790",
+        "http://172.16.0.5:8790",
+        "http://100.63.255.255:8790",
+        "http://100.128.0.1:8790",
+        "http://example.com:8790",
+        "http://evil.ts.net.attacker.com:8790",
+        "http://user:pass@100.100.100.100:8790",
+        "https://100.100.100.100:8790",
+    ] {
+        assert!(
+            validate_worker_url(forbidden).is_err(),
+            "should reject {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn gpu_assisted_mode_fails_truthfully_when_worker_not_configured() {
+    let mut body = request();
+    body["render_mode"] = json!("gpu_assisted");
+    let (status, value) = call(Method::POST, "/api/v1/preview", body).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(value["error"]["code"], "gpu_unavailable");
+}
+
+#[tokio::test]
+async fn gpu_assisted_mode_bridges_to_authenticated_worker_and_validates_artifact() {
+    use senior_meal_preview::{RuntimeConfig, worker::GpuWorkerConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::with_capacity(1024);
+        let mut chunk = [0u8; 512];
+        loop {
+            let n = socket.read(&mut chunk).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.ends_with(b"}") {
+                break;
+            }
+        }
+        let req_text = String::from_utf8_lossy(&buf);
+        assert!(req_text.contains("POST /v1/generate HTTP/1.1"));
+        assert!(req_text.contains("Authorization: Bearer ts-secret-token"));
+        assert!(req_text.contains("\"dish_id\":\"chicken_rice\""));
+
+        let response_json = json!({
+            "provider": "tailscale-gpu-worker",
+            "model": "brushnet-sdxl+qwen2.5-vl-7b-4bit",
+            "prompt_id": "t2_r1_hawker_t1b_broccoli",
+            "seed": 42,
+            "attempts": 2,
+            "checker_passed": true,
+            "image_data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+            "generated_label": "AI-generated preview · Not a real meal or clinical verification"
+        })
+        .to_string();
+        let http_resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            response_json.len(),
+            response_json
+        );
+        socket.write_all(http_resp.as_bytes()).await.unwrap();
+    });
+
+    let worker_cfg = GpuWorkerConfig::new(
+        &format!("http://127.0.0.1:{}", addr.port()),
+        Some("ts-secret-token".into()),
+        std::time::Duration::from_secs(5),
+        2,
+    )
+    .unwrap();
+    let app = senior_meal_preview::app_with_config(RuntimeConfig {
+        gpu_worker: Some(worker_cfg),
+        ..RuntimeConfig::default()
+    });
+
+    // Catalog reports gpu_preview = true when worker is configured.
+    let catalog_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/catalog")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let catalog_bytes = catalog_resp.into_body().collect().await.unwrap().to_bytes();
+    let catalog_val: Value = serde_json::from_slice(&catalog_bytes).unwrap();
+    assert_eq!(catalog_val["capabilities"]["gpu_preview"], true);
+
+    let mut body = request();
+    body["render_mode"] = json!("gpu_assisted");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let value: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["gpu_artifact"]["provider"], "tailscale-gpu-worker");
+    assert_eq!(value["gpu_artifact"]["attempts"], 2);
+    assert_eq!(value["gpu_artifact"]["checker_passed"], true);
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn ec2_api_token_and_configured_origins_are_enforced() {
+    use senior_meal_preview::RuntimeConfig;
+
+    let app = senior_meal_preview::app_with_config(RuntimeConfig {
+        api_token: Some("ec2-prod-token".into()),
+        allowed_origins: vec!["https://mealpreview.example.com".into()],
+        ..RuntimeConfig::default()
+    });
+
+    // /healthz remains unauthenticated for EC2/ALB/Caddy probes.
+    let health = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/healthz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+
+    // /api/v1/catalog rejects missing bearer token.
+    let unauth = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/catalog")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    // /api/v1/catalog succeeds with valid bearer token and allows configured HTTPS origin.
+    let authed = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/v1/catalog")
+                .header(header::AUTHORIZATION, "Bearer ec2-prod-token")
+                .header(header::ORIGIN, "https://mealpreview.example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(authed.status(), StatusCode::OK);
+    assert_eq!(
+        authed.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        "https://mealpreview.example.com"
+    );
+}

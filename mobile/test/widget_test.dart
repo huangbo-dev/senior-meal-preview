@@ -11,11 +11,13 @@ import 'fixtures.dart';
 class FakeApi implements MealApi {
   bool failCatalog = false;
   bool failPreview = false;
+  bool gpuPreviewEnabled = false;
   int catalogCalls = 0;
   int previewCalls = 0;
   String? sentDish;
   List<String>? sentChanges;
   MealPreferences? sentPreferences;
+  String? sentRenderMode;
   Completer<MealPreview>? pending;
 
   @override
@@ -23,6 +25,12 @@ class FakeApi implements MealApi {
     catalogCalls++;
     if (failCatalog) {
       throw const ApiException('Cannot reach the local service.');
+    }
+    if (gpuPreviewEnabled) {
+      return Catalog.fromJson({
+        ...catalogJson,
+        'capabilities': {'symbolic_preview': true, 'gpu_preview': true},
+      });
     }
     return catalog;
   }
@@ -32,18 +40,37 @@ class FakeApi implements MealApi {
     required String dishId,
     required List<String> changeIds,
     required MealPreferences preferences,
+    String renderMode = 'illustrative_only',
   }) async {
     previewCalls++;
     sentDish = dishId;
     sentChanges = changeIds;
     sentPreferences = preferences;
+    sentRenderMode = renderMode;
     if (failPreview) {
       throw const ApiException('The local service took too long.');
     }
     if (pending != null) return pending!.future;
-    return MealPreview.fromJson(
-      previewJson(dishId: dishId, changes: changeIds, preferences: preferences),
+    final body = previewJson(
+      dishId: dishId,
+      changes: changeIds,
+      preferences: preferences,
     );
+    if (renderMode == 'gpu_assisted') {
+      body['gpu_artifact'] = {
+        'provider': 'tailscale-gpu-worker',
+        'model': 'brushnet-sdxl+qwen2.5-vl-7b-4bit',
+        'prompt_id': 't2_r1_hawker',
+        'seed': 7,
+        'attempts': 2,
+        'checker_passed': true,
+        'image_data_url':
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'generated_label':
+            'AI-generated preview · Not a real meal or clinical verification',
+      };
+    }
+    return MealPreview.fromJson(body);
   }
 
   @override
@@ -324,6 +351,152 @@ void main() {
       } finally {
         handle.dispose();
       }
+    },
+  );
+
+  testWidgets(
+    'sentence-case progress, fish soup one-choice copy, and disabled reason',
+    (tester) async {
+      final api = FakeApi();
+      await tester.pumpWidget(MealPreviewApp(api: api));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Step 1 of 3 · Choose a meal'), findsOneWidget);
+      expect(find.text('Choose a familiar meal'), findsOneWidget);
+
+      await selectMeal(tester);
+      expect(find.text('Step 2 of 3 · Make it yours'), findsOneWidget);
+      expect(find.text('Choose 1 or 2 changes'), findsOneWidget);
+      expect(
+        find.text('0 of 2 selected. Choose at least one change to continue.'),
+        findsOneWidget,
+      );
+
+      await tapKey(tester, 'change-extra_vegetables');
+      await tapKey(tester, 'change-brown_rice');
+      expect(
+        find.text('2 of 2 selected. Remove one to choose another.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('unavailable-sauce_on_side')),
+        findsOneWidget,
+      );
+
+      // Going back to the same meal preserves selections; switching meals clears them.
+      await tapKey(tester, 'back');
+      await tapKey(tester, 'continue');
+      expect(
+        tester
+            .widget<CheckboxListTile>(
+              find.byKey(const Key('change-extra_vegetables')),
+            )
+            .value,
+        true,
+      );
+
+      await tapKey(tester, 'back');
+      await selectMeal(tester, id: 'fish_soup');
+      expect(find.text('Choose this change to see an idea'), findsOneWidget);
+      expect(
+        find.text('0 of 1 selected. Choose this change to continue.'),
+        findsOneWidget,
+      );
+      expect(find.text('Choose 1 or 2 changes'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'compact meal card at narrow width switches to stacked at 200 percent text',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('meal-compact-chicken_rice')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('meal-stacked-chicken_rice')), findsNothing);
+
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('meal-stacked-chicken_rice')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('meal-compact-chicken_rice')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'preview places request summary before plates with neutral bullets and supports back navigation',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpAndSettle();
+      await selectMeal(tester);
+      expect(
+        find.text(
+          'A texture request only. This does not check swallowing safety.',
+        ),
+        findsOneWidget,
+      );
+      await tapKey(tester, 'change-extra_vegetables');
+      await tapKey(tester, 'submit');
+
+      expect(find.text('Step 3 of 3 · See the idea'), findsOneWidget);
+      expect(find.text('Your requested meal idea'), findsOneWidget);
+      expect(find.byIcon(Icons.check_circle_outline), findsNothing);
+
+      final summaryTop = tester
+          .getTopLeft(find.byKey(const Key('request-summary')))
+          .dy;
+      final plateTop = tester
+          .getTopLeft(find.byKey(const Key('plate-original')))
+          .dy;
+      expect(summaryTop, lessThan(plateTop));
+
+      // System back returns to Step 2 with choices intact, then Step 1.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Step 2 of 3 · Make it yours'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Step 1 of 3 · Choose a meal'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Tailscale GPU preview mode appears when server advertises capability and renders provenance card',
+    (tester) async {
+      final api = FakeApi()..gpuPreviewEnabled = true;
+      await tester.pumpWidget(MealPreviewApp(api: api));
+      await tester.pumpAndSettle();
+      await selectMeal(tester);
+
+      expect(find.byKey(const Key('render-gpu')), findsOneWidget);
+      await tapKey(tester, 'change-extra_vegetables');
+      await tapKey(tester, 'render-gpu');
+      await tapKey(tester, 'submit');
+
+      expect(api.sentRenderMode, 'gpu_assisted');
+      expect(find.byKey(const Key('gpu-preview-card')), findsOneWidget);
+      expect(find.text('Tailscale GPU model preview'), findsOneWidget);
+      expect(
+        find.text(
+          'AI-generated preview · Not a real meal or clinical verification',
+        ),
+        findsOneWidget,
+      );
     },
   );
 }

@@ -1,8 +1,8 @@
 # A little change: UI design specification
 
 **Scope:** `extensions/senior-meal-preview/` only. Separate, non-submission Flutter + Rust app.
-**Design baseline:** commit `023aac0ceab7d64fd795345277fec93d086b8dc7`, inspected 8 November 2026.
-**Status:** implemented baseline plus prioritized proposals. Proposals below are not shipped features or evidence of validation.
+**Design baseline:** commit `023aac0ceab7d64fd795345277fec93d086b8dc7`, P0/P1 pass implemented 8 November 2026.
+**Status:** P0 and P1 implemented in Flutter (`mobile/lib/theme.dart`, `mobile/lib/widgets.dart`, `mobile/lib/main.dart`) and Rust (`backend/src/lib.rs`). Native assistive-technology and older-adult usability work (P2) remain future work.
 
 Start with [AGENT_HANDOFF.md](AGENT_HANDOFF.md) for the takeover sequence, [UI acceptance](docs/UI_ACCEPTANCE.md) for test cases, and [design tokens](docs/design-tokens.json) for machine-readable values. This document is the requested design.md handoff; keep one canonical specification rather than a second case-only filename.
 
@@ -28,10 +28,10 @@ The implemented prototype is **Flutter → loopback Rust API → hand-authored c
 | --- | --- | --- |
 | Loading | Brand → loading indicator and “Getting the meal choices…” | `_loadingView()` |
 | Catalog failure | Brand → “Let’s reconnect” → explanation → “Try again” → local-service note | `_catalogFailure()` |
-| 1. Choose a meal | Brand → step label → headline → instruction → illustrative notice → three meal cards → “Choose my changes” → selection helper | `_chooseMeal()`, `_mealCard()` |
-| 2. Make it yours | Brand/reset → step label → dish context → 1–2 change instruction/count → compatible change rows → optional texture/flavour → error if any → “See my meal idea” → “Back to meals” | `_chooseChanges()` |
+| 1. Choose a meal | Brand → step label → headline → instruction → illustrative notice → three meal cards → “Choose my changes” → selection helper | `_chooseMeal()`, `MealCard` |
+| 2. Make it yours | Brand/reset → step label → dish context → 1–2 change instruction/count → compatible change rows → optional texture/flavour → error if any → “See my meal idea” → “Back to meals” | `_chooseChanges()`, `ChangeOption`, `PreferenceGroup` |
 | Submission | Same screen, selections/preferences locked, submit disabled with progress; Back and Start over remain available | `_submit()`, request-version guard |
-| 3. See the idea | Brand/reset → step label → headline/summary → simulation disclosure → original/requested plates → requested changes/preferences → notices → edit/another-meal actions | `_showPreview()`, `_plateCard()` |
+| 3. See the idea | Brand/reset → step label → headline/summary → simulation disclosure → requested changes/preferences (`RequestSummary`) → original/requested plates (`PlateCard`) → notices → edit/another-meal actions | `_showPreview()`, `RequestSummary`, `PlateCard` |
 
 There is no bottom navigation, login, dashboard, camera, history, saving, nutrition panel, settings screen or permanent user record. Do not add navigation destinations merely to fill a mockup.
 
@@ -68,7 +68,7 @@ Values in [design-tokens.json](docs/design-tokens.json) are explicit source valu
 | Error surface / text | `#FBE9E3` / `#7E211E` | Plain-language error box; icon `#9C2520` |
 | Subtle outline | `#D7DDD1` | Decorative card edge; insufficient as sole state/control indicator |
 | Plate-card surface | `#EAEDE2` | Illustration presentation |
-| Proposed strong outline | `#718476` | Candidate for interactive boundaries/focus-adjacent controls when needed; not implemented |
+| Strong outline | `#718476` | Implemented boundary for unselected interactive cards and chips |
 
 Computed sRGB contrast ratios for solid colors: ink/cream **11.09:1**, secondary/cream **5.75:1**, white/ink **11.99:1**, ink/selected **10.31:1**, ink/notice **9.79:1**, error text/error surface **8.41:1**. Subtle outline/white is only **1.39:1**; do not rely on that edge alone. Proposed strong outline/white is **3.99:1** and /cream **3.69:1**. These are token calculations, not a rendered UI audit. Test generated Material colors, disabled states, focus, text overlays and actual screenshots independently.
 
@@ -76,24 +76,23 @@ Computed sRGB contrast ratios for solid colors: ink/cream **11.09:1**, secondary
 
 | Role | Implemented size / line-height / weight |
 | --- | --- |
-| Main headline | 38sp / 1.12 / 700, tracking −1.2 |
-| Section heading | 27sp / 1.20 / 700 |
-| Card/title | 22sp / 1.30 / 700 |
-| Group title | 19sp / 1.40 / 600 |
-| Body large | 19sp / 1.50 |
-| Body medium / notices | 17sp / 1.45 |
-| Primary label | 18sp / 700 |
-| Progress metadata | 14sp / 800, uppercase, tracking 1.3 |
+| Main headline (`displaySmall`) | 28sp / 1.18 / 700, tracking −0.3 |
+| Section heading (`headlineSmall`) | 22sp / 1.25 / 700, tracking −0.15 |
+| Card/title (`titleLarge`) | 20sp / 1.28 / 700 |
+| Group title (`titleMedium`) | 18sp / 1.35 / 700 |
+| Body large (`bodyLarge`) | 18sp / 1.45 / 400 |
+| Body medium / notices (`bodyMedium`) | 16.5sp / 1.42 / 400 |
+| Primary label (`labelLarge`) | 18sp / 1.30 / 700 |
+| Progress metadata (`labelMedium`) | 16sp / 1.38 / 600, sentence case (“Step 1 of 3 · Choose a meal”) |
 
-- Font: locally bundled Roboto in web builds; do not introduce remote font calls. Verify the actual native font behavior before claiming parity.
-- Baseline spacing is generally 8/12/16/18/20/24/32 logical pixels. Retain clear 24px major section gaps; do not imply these are already centralized tokens.
-- Page horizontal padding is 24px; max outer content width is 800px. SafeArea remains mandatory.
-- Main button minimum height is 58px, outlined 56px, text-button target 52px high; labels can wrap and containers must grow with scaling.
-- Card radii: meal 22px, change 18px, plate 24px, notice 16px. Button radius 18px.
-- Proposal: progress label becomes sentence case, 16sp minimum (“Step 1 of 3 · Choose a meal”). Allow natural wrapping. Test rather than constraining it to one line.
-- Proposal: extract a reusable theme/token layer before changing values across screens. Avoid a parallel CSS or React implementation of this Flutter UI.
+- Font: locally bundled Roboto (`AppTypography.fontFamily` in `mobile/lib/theme.dart`) applied explicitly to every `TextTheme` slot, button theme, chip, and card so iOS, Android, and Web never mix platform fallback fonts (`SF Pro` vs `Roboto`) or unbundled italics.
+- Page padding is `EdgeInsets.fromLTRB(20, 16, 20, 28)`; max outer content width is 800px. SafeArea remains mandatory.
+- Main and outlined button minimum height is 56px, text-button target 48px high; labels can wrap and containers must grow with scaling.
+- Card radii: meal 20px, change 18px, plate 22px, notice 16px. Button radius 16px.
+- Progress label uses sentence case, 16sp minimum (“Step 1 of 3 · Choose a meal”), allowing natural wrapping.
+- Theme and tokens are centralized in `mobile/lib/theme.dart` with reusable widgets in `mobile/lib/widgets.dart`. Avoid a parallel CSS or React implementation of this Flutter UI.
 
-## 4. Proposed layout pass (P1, not implemented)
+## 4. Layout pass (P1, implemented)
 
 ### Meal selection
 
@@ -135,28 +134,28 @@ The symbolic vegetables/rice/sauce may change in the painter, but Soft and Mild 
 | Edit preview | Return to change screen with choices intact; discard obsolete preview |
 | Start over / another meal | Clear meal, changes, preferences and preview; return to first step |
 | Refresh/close | In-memory choices disappear; no false “saved” message |
-| Stage transition | Scroll to top already implemented. **Proposed:** move accessibility/keyboard focus to new heading and announce stage without duplicate announcements |
+| Stage transition | Scroll to top and move accessibility/keyboard focus to new step heading (`StepHeading`) without duplicate announcements |
 | Reset safety | Current reset is immediate. **Proposed:** assess accidental-reset risk during usability work; if adding confirmation, “Keep editing” must preserve state and a canceled dialog must restore focus |
 
 Current request invalidation prevents stale rendering; it is **not** cancellation of an executing server job. No server job currently exists. Any later asynchronous generation needs a separate cancellation contract.
 
-## 6. Copy rules and recommended refinements
+## 6. Copy rules and implemented refinements
 
 Keep current labels when they are truthful and familiar. Reduce cognitive load without hiding limitations.
 
-| Context | Suggested next-pass copy | Status |
+| Context | Copy | Status |
 | --- | --- | --- |
-| Start headline | “Choose a familiar meal” | Proposal for testing against current editorial headline |
-| Demo callout | “Demo only. These drawings are not AI results or nutrition advice.” | Proposal; preserve full limitations at preview |
-| Progress | “Step 2 of 3 · Make it yours” | Proposal |
-| No selected changes | “Choose at least one change to continue.” | Proposal, supporting copy |
-| Two selected | “2 of 2 selected. Remove one to choose another.” | Current meaning, plain-language refinement |
-| Submission | “Preparing your meal idea…” | Proposal; replace sparkles with neutral preview/plate icon to reduce implied AI generation |
-| Preview heading | “Your requested meal idea” | Proposal |
-| Preview disclosure | “Illustration only. These drawings do not show a real meal or an AI result. Nutrition, texture, allergens and clinical safety have not been checked.” | Proposal; never reduce to an ambiguous “results may vary” |
-| Soft preference helper | “A texture request only. This does not check swallowing safety.” | Proposal for contextual placement |
+| Start headline | “Choose a familiar meal” | Implemented (`StepHeading`) |
+| Demo callout | “Demo only. These drawings are not AI results or nutrition advice.” | Implemented (`NoticeCard`) |
+| Progress | “Step 2 of 3 · Make it yours” | Implemented (`StepProgress`, 16sp sentence case) |
+| No selected changes | “Choose at least one change to continue.” / “Choose this change to continue.” (1-choice dish) | Implemented (`change-selection-status`) |
+| Two selected | “2 of 2 selected. Remove one to choose another.” plus inline disabled helper | Implemented (`change-selection-status`, `ChangeOption`) |
+| Submission | “Preparing your meal idea…” | Implemented with neutral preview icon (`Icons.visibility_outlined`) |
+| Preview heading | “Your requested meal idea” | Implemented (`StepHeading`) |
+| Preview disclosure | “Illustration only. These drawings do not show a real meal or an AI result. Nutrition, texture, allergens and clinical safety have not been checked.” | Implemented (`NoticeCard`) |
+| Soft preference helper | “A texture request only. This does not check swallowing safety.” | Implemented (`PreferenceGroup`) |
 
-Do not use a success check icon to imply the requested change has been independently verified. If retaining check icons in the “What you requested” list, pair them clearly with that heading/semantics; a neutral bullet is the safer proposed option. Keep technical “local Rust service” recovery help for this developer prototype, not as assumed final consumer copy.
+`RequestSummary` (“What you requested”) uses neutral circle bullets rather than check icons so requested changes are never visually confused with verified outcomes. Keep technical “local Rust service” recovery help for this developer prototype, not as assumed final consumer copy.
 
 ## 7. Accessibility acceptance intent
 
@@ -185,6 +184,6 @@ Targets are implementation criteria, not certification or proof of older-adult v
 
 ## 9. Inspection and source record
 
-Reviewed source: `mobile/lib/main.dart`, `plate.dart`, `models.dart`, `api.dart`, `mobile/test/widget_test.dart`, `backend/src/lib.rs`, README and all existing API/architecture/testing docs at the baseline commit. Visually inspected the existing 390px-wide start-screen capture supplied by the implementation worker. Later-screen findings above are source inspection unless identified as earlier testing in [TESTING.md](docs/TESTING.md).
+Reviewed and updated source: `mobile/lib/main.dart`, `mobile/lib/theme.dart`, `mobile/lib/widgets.dart`, `mobile/lib/plate.dart`, `mobile/lib/models.dart`, `mobile/lib/api.dart`, `mobile/test/widget_test.dart`, `mobile/test/api_test.dart`, `backend/src/lib.rs`, `backend/src/main.rs`, `backend/tests/api.rs`, and all extension documentation on 8 November 2026.
 
-The existing verification record reports 11 Rust API test functions, 20 Flutter unit/widget tests, static/format checks, web build, live Dart-to-Rust smoke and Chrome desktop/mobile flow checks. This documentation pass does not repeat or extend those results. Native device/assistive-technology/user-study validation remains outstanding. No code, experiment, report or GPU process was changed by this design specification.
+The current verification record in [TESTING.md](docs/TESTING.md) reports 19 Rust API test functions, 3 Python GPU worker test suites, 26 Flutter unit/widget tests, strict static/format checks (`flutter analyze --fatal-infos`), release web build, Android debug APK build, iOS simulator build + launch (`iPhone 17 Pro`, iOS 26.5), live Dart-to-Rust dual-mode smoke, and 15 rendered acceptance screenshots across `390×844` (100% text), `360×800` (200% text) and `800×900` wide layout. Native assistive-technology (VoiceOver/TalkBack) and older-adult usability sessions remain outstanding. No coursework, experiment, report or GPU process was changed.

@@ -49,16 +49,16 @@ Capture at least: initial meal screen (unselected/selected), change screen (one/
 
 Do not mark A11 passed based on Flutter widget semantics or Chrome canvas inspection. Do not equate lack of overflow exceptions with full A01/A02 verification.
 
-## Evidence and scope review
+## Evidence and scope review (P0/P1 pass, 8 November 2026)
 
-- [ ] Each preview plate explicitly says it is simulated; distinction survives narrow/large-text layouts.
-- [ ] “Requested” is used consistently; no checked/approved health result implied by icons or wording.
-- [ ] Soft/Mild remain optional and do not claim verified texture or swallowing safety.
-- [ ] No calories, allergen guarantees, nutrient deltas, model confidence or fabricated improvement metrics.
-- [ ] No photos/uploads, saved accounts/preferences, health fields, analytics or remote inference added.
-- [ ] Catalog/API unavailable is truthful, without hidden fixture fallback.
-- [ ] Research experiment/report/study files remain unchanged; extension remains outside coursework submission.
-- [ ] Test outcome distinguishes code tests, visual inspection, native tests and actual user research.
+- [x] Each preview plate explicitly says it is simulated; distinction survives narrow/large-text layouts.
+- [x] “Requested” is used consistently; no checked/approved health result implied by icons or wording (`RequestSummary` uses neutral circle bullets).
+- [x] Soft/Mild remain optional and do not claim verified texture or swallowing safety.
+- [x] No calories, allergen guarantees, nutrient deltas, model confidence or fabricated improvement metrics.
+- [x] No photos/uploads, saved accounts/preferences, health fields, analytics or remote inference added.
+- [x] Catalog/API unavailable is truthful, without hidden fixture fallback.
+- [x] Research experiment/report/study files remain unchanged; extension remains outside coursework submission.
+- [x] Test outcome distinguishes code tests, visual inspection, native tests and actual user research (`A11` native VoiceOver/TalkBack and older-adult usability sessions remain open).
 
 ## Human usability work, later
 

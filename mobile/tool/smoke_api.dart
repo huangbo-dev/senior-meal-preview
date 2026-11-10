@@ -10,8 +10,10 @@ Future<void> main() async {
   );
   try {
     final catalog = await api.fetchCatalog();
-    if (catalog.dishes.length != 3) {
-      throw StateError('Expected three demo meals.');
+    if (catalog.dishes.length != 3 ||
+        catalog.selection.minChanges != 1 ||
+        catalog.selection.maxChanges != 2) {
+      throw StateError('Expected three demo meals and 1–2 selection rules.');
     }
     stdout.writeln(
       'PASS: Production client decoded catalog (${catalog.dishes.length} meals).',
@@ -46,6 +48,23 @@ Future<void> main() async {
       'incompatible change',
       'That change is not available for this meal.',
     );
+    if (catalog.capabilities.gpuPreview) {
+      final gpuPreview = await api.preview(
+        dishId: 'chicken_rice',
+        changeIds: ['extra_vegetables', 'brown_rice'],
+        preferences: const MealPreferences(texture: 'soft', flavour: 'mild'),
+        renderMode: 'gpu_assisted',
+      );
+      if (gpuPreview.gpuArtifact == null ||
+          !gpuPreview.gpuArtifact!.imageDataUrl.startsWith(
+            'data:image/png;base64,',
+          )) {
+        throw StateError('Expected valid GPU artifact from worker bridge.');
+      }
+      stdout.writeln(
+        'PASS: Production client decoded Tailscale GPU worker artifact (${gpuPreview.gpuArtifact!.promptId}).',
+      );
+    }
     stdout.writeln('All live Rust/Flutter API smoke checks passed.');
   } catch (error) {
     stderr.writeln('FAIL: $error');

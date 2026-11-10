@@ -43,6 +43,7 @@ final catalogJson = <String, dynamic>{
       'dish_ids': ['chicken_rice', 'tofu_rice'],
     },
   ],
+  'selection': {'min_changes': 1, 'max_changes': 2},
   'notice':
       'Prototype only. Illustrations are not model results or nutrition advice.',
 };

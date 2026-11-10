@@ -1,0 +1,24 @@
+[Unit]
+Description=Senior Meal Preview Tailscale GPU Worker
+After=network-online.target tailscaled.service
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+User=mealworker
+Group=mealworker
+EnvironmentFile=/etc/senior-meal-preview/gpu-worker.env
+WorkingDirectory=/opt/senior-meal-preview/gpu-worker
+ExecStart=/usr/bin/python3 /opt/senior-meal-preview/gpu-worker/gpu_worker.py
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

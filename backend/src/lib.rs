@@ -1,17 +1,124 @@
-//! Local-only, stateless illustrative meal-preview API. No image or model pipeline.
+//! Stateless meal-preview API with optional Tailscale GPU model-worker bridge for EC2 deployment.
+//!
+//! By default (`MODEL_WORKER_URL` unset), the service runs in `illustrative_only` mode with zero
+//! external network calls. When `MODEL_WORKER_URL` is configured on an EC2 instance joined to a
+//! Tailscale tailnet, `render_mode: "gpu_assisted"` requests are validated and forwarded over
+//! Tailscale (`100.64.0.0/10` or `*.ts.net`) or loopback to the isolated GPU worker, never
+//! silently substituting mock images on failure.
+
+pub mod worker;
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, rejection::JsonRejection},
-    http::{HeaderValue, Method, StatusCode, header},
+    extract::{DefaultBodyLimit, Request, State, rejection::JsonRejection},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use tower_http::cors::{AllowOrigin, CorsLayer};
+use std::{sync::Arc, sync::LazyLock, time::Duration};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    timeout::TimeoutLayer,
+};
+use worker::{GpuArtifact, GpuWorkerConfig, WorkerFailure, WorkerGenerateRequest, WorkerTransport};
 
 pub const MODE: &str = "illustrative_only";
 pub const NOTICE: &str = "Prototype only. Illustrations are not model results or nutrition advice.";
+/// Fewest and most serving changes a single preview request may contain.
+pub const MIN_CHANGES: usize = 1;
+pub const MAX_CHANGES: usize = 2;
+/// Default upper bound for reading and answering an illustrative request.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default timeout for a remote Tailscale GPU worker request.
+pub const DEFAULT_GPU_TIMEOUT: Duration = Duration::from_secs(25);
+
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    pub timeout: Duration,
+    pub allowed_origins: Vec<String>,
+    pub api_token: Option<String>,
+    pub gpu_worker: Option<GpuWorkerConfig>,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            timeout: REQUEST_TIMEOUT,
+            allowed_origins: Vec::new(),
+            api_token: None,
+            gpu_worker: None,
+        }
+    }
+}
+
+impl RuntimeConfig {
+    /// Load configuration from environment variables (`APP_ALLOWED_ORIGINS`, `APP_API_TOKEN`,
+    /// `MODEL_WORKER_URL`, `MODEL_WORKER_TOKEN`, `MODEL_WORKER_TIMEOUT_MS`,
+    /// `MODEL_WORKER_MAX_CONCURRENT`).
+    pub fn from_env() -> Result<Self, String> {
+        let allowed_origins = std::env::var("APP_ALLOWED_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        for origin in &allowed_origins {
+            if !is_valid_configured_origin(origin) {
+                return Err(format!(
+                    "Invalid origin '{origin}' in APP_ALLOWED_ORIGINS; use exact http(s)://host[:port]."
+                ));
+            }
+        }
+        let api_token = std::env::var("APP_API_TOKEN")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+
+        let gpu_timeout_ms: u64 = match std::env::var("MODEL_WORKER_TIMEOUT_MS") {
+            Ok(v) if !v.trim().is_empty() => v
+                .trim()
+                .parse()
+                .map_err(|_| "MODEL_WORKER_TIMEOUT_MS must be a positive integer.".to_string())?,
+            _ => DEFAULT_GPU_TIMEOUT.as_millis() as u64,
+        };
+        let gpu_max_concurrent: usize = match std::env::var("MODEL_WORKER_MAX_CONCURRENT") {
+            Ok(v) if !v.trim().is_empty() => v
+                .trim()
+                .parse()
+                .map_err(|_| "MODEL_WORKER_MAX_CONCURRENT must be between 1 and 16.".to_string())?,
+            _ => 2,
+        };
+        let worker_token = std::env::var("MODEL_WORKER_TOKEN")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+
+        let gpu_worker = match std::env::var("MODEL_WORKER_URL") {
+            Ok(url) if !url.trim().is_empty() => Some(GpuWorkerConfig::new(
+                url.trim(),
+                worker_token,
+                Duration::from_millis(gpu_timeout_ms.max(100)),
+                gpu_max_concurrent,
+            )?),
+            _ => None,
+        };
+
+        let request_timeout = match &gpu_worker {
+            Some(w) => REQUEST_TIMEOUT.max(w.timeout + Duration::from_secs(2)),
+            None => REQUEST_TIMEOUT,
+        };
+
+        Ok(Self {
+            timeout: request_timeout,
+            allowed_origins,
+            api_token,
+            gpu_worker,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Dish {
@@ -29,16 +136,47 @@ pub struct Change {
     pub dish_ids: Vec<&'static str>,
 }
 
-#[derive(Serialize)]
+/// Selection limits enforced by `POST /api/v1/preview`, published so clients do not
+/// hard-code them. Additive to schema v1; older clients can ignore it.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Selection {
+    pub min_changes: usize,
+    pub max_changes: usize,
+}
+
+/// Server-advertised preview capabilities so clients know whether a Tailscale GPU worker
+/// is available behind this EC2 gateway.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Capabilities {
+    pub symbolic_preview: bool,
+    pub gpu_preview: bool,
+}
+
+#[derive(Clone, Serialize)]
 pub struct Catalog {
     schema_version: u8,
     mode: &'static str,
-    dishes: Vec<Dish>,
-    changes: Vec<Change>,
+    pub dishes: Vec<Dish>,
+    pub changes: Vec<Change>,
+    pub selection: Selection,
+    pub capabilities: Capabilities,
     notice: &'static str,
 }
 
-pub fn catalog() -> Catalog {
+/// The hand-authored demo catalog, built once and shared by every request.
+pub static CATALOG: LazyLock<Catalog> = LazyLock::new(build_catalog);
+
+pub fn catalog() -> &'static Catalog {
+    &CATALOG
+}
+
+pub fn catalog_for(gpu_enabled: bool) -> Catalog {
+    let mut base = CATALOG.clone();
+    base.capabilities.gpu_preview = gpu_enabled;
+    base
+}
+
+fn build_catalog() -> Catalog {
     Catalog {
         schema_version: 1,
         mode: MODE,
@@ -82,6 +220,14 @@ pub fn catalog() -> Catalog {
                 dish_ids: vec!["chicken_rice", "tofu_rice"],
             },
         ],
+        selection: Selection {
+            min_changes: MIN_CHANGES,
+            max_changes: MAX_CHANGES,
+        },
+        capabilities: Capabilities {
+            symbolic_preview: true,
+            gpu_preview: false,
+        },
         notice: NOTICE,
     }
 }
@@ -102,6 +248,14 @@ pub enum Flavour {
     Mild,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderMode {
+    #[default]
+    IllustrativeOnly,
+    GpuAssisted,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -118,6 +272,8 @@ pub struct PreviewRequest {
     pub change_ids: Vec<String>,
     #[serde(default)]
     pub preferences: Preferences,
+    #[serde(default)]
+    pub render_mode: RenderMode,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +292,8 @@ pub struct Preview {
     preferences: Preferences,
     summary: String,
     notices: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_artifact: Option<GpuArtifact>,
 }
 
 #[derive(Debug, Serialize)]
@@ -171,22 +329,28 @@ pub fn make_preview(request: PreviewRequest) -> Result<Preview, ApiError> {
     let catalog = catalog();
     let dish = catalog
         .dishes
-        .into_iter()
+        .iter()
         .find(|dish| dish.id == request.dish_id)
+        .cloned()
         .ok_or_else(|| ApiError::invalid("unknown_dish", "Choose a meal from the catalog."))?;
-    if !(1..=2).contains(&request.change_ids.len()) {
+    if !(MIN_CHANGES..=MAX_CHANGES).contains(&request.change_ids.len()) {
         return Err(ApiError::invalid(
             "change_count",
             "Choose one or two meal changes.",
         ));
     }
-    if request.change_ids.len() == 2 && request.change_ids[0] == request.change_ids[1] {
+    let ids = &request.change_ids;
+    if ids
+        .iter()
+        .enumerate()
+        .any(|(index, id)| ids[..index].contains(id))
+    {
         return Err(ApiError::invalid(
             "duplicate_change",
             "Choose different meal changes.",
         ));
     }
-    let mut targets = Vec::with_capacity(2);
+    let mut targets = Vec::with_capacity(MAX_CHANGES);
     for id in request.change_ids {
         let change = catalog
             .changes
@@ -230,10 +394,12 @@ pub fn make_preview(request: PreviewRequest) -> Result<Preview, ApiError> {
         preferences: request.preferences,
         summary,
         notices,
+        gpu_artifact: None,
     })
 }
 
 async fn preview(
+    State(config): State<Arc<RuntimeConfig>>,
     body: Result<Json<PreviewRequest>, JsonRejection>,
 ) -> Result<Json<Preview>, ApiError> {
     let Json(request) = body.map_err(|error| {
@@ -256,7 +422,58 @@ async fn preview(
         };
         ApiError::new(status, code, message)
     })?;
-    make_preview(request).map(Json)
+
+    let render_mode = request.render_mode;
+    let worker_req = WorkerGenerateRequest {
+        schema_version: 1,
+        dish_id: request.dish_id.clone(),
+        change_ids: request.change_ids.clone(),
+        texture: request.preferences.texture.clone(),
+        flavour: request.preferences.flavour.clone(),
+    };
+    let mut result = make_preview(request)?;
+
+    if render_mode == RenderMode::GpuAssisted {
+        let Some(ref worker_cfg) = config.gpu_worker else {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "gpu_unavailable",
+                "The Tailscale GPU model worker is not configured on this server. Switch to symbolic illustration or start the worker.",
+            ));
+        };
+        let artifact = worker::request_gpu_preview(worker_cfg, &worker_req)
+            .await
+            .map_err(|failure| match failure {
+                WorkerFailure::Busy => ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "gpu_busy",
+                    "The GPU model worker is busy with another request. Please try again or use symbolic illustration.",
+                ),
+                WorkerFailure::Timeout => ApiError::new(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "gpu_timeout",
+                    "The Tailscale GPU model worker timed out. Check the GPU node or use symbolic illustration.",
+                ),
+                WorkerFailure::Unreachable(_) => ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "gpu_unreachable",
+                    "Cannot reach the GPU model worker over Tailscale. Verify tailscaled and the worker service.",
+                ),
+                WorkerFailure::InvalidResponse(_) => ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "gpu_invalid_response",
+                    "The GPU model worker returned an invalid response. No mock image was substituted.",
+                ),
+            })?;
+        // Replace the no-AI-model notice with the truthful GPU-worker provenance notice.
+        result.notices[1] = "Generated via the private Tailscale GPU worker from predefined meal IDs. No personal photo was uploaded and no record is stored.";
+        result.notices.push(
+            "Checker pass status is an automated selection diagnostic, not human or clinical verification.",
+        );
+        result.gpu_artifact = Some(artifact);
+    }
+
+    Ok(Json(result))
 }
 
 fn local_web_origin(origin: &HeaderValue) -> bool {
@@ -271,25 +488,122 @@ fn local_web_origin(origin: &HeaderValue) -> bool {
     matches!(host, "localhost" | "127.0.0.1") && port.parse::<u16>().is_ok_and(|p| p > 0)
 }
 
+fn is_valid_configured_origin(origin: &str) -> bool {
+    let Some(authority) = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    if authority.is_empty() || authority.contains(['/', '?', '#', '@', ' ']) {
+        return false;
+    }
+    let (host, port) = authority.rsplit_once(':').unwrap_or((authority, "443"));
+    !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p > 0)
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+async fn require_api_token(
+    State(config): State<Arc<RuntimeConfig>>,
+    headers: HeaderMap,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    if request.method() != Method::OPTIONS
+        && let Some(ref expected) = config.api_token
+    {
+        let provided = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(str::trim);
+        match provided {
+            Some(token) if constant_time_eq(token.as_bytes(), expected.as_bytes()) => {}
+            _ => {
+                return Err(ApiError::new(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "Missing or invalid API bearer token.",
+                ));
+            }
+        }
+    }
+    Ok(next.run(request).await)
+}
+
 pub fn app() -> Router {
+    app_with_config(RuntimeConfig::default())
+}
+
+/// Same router as [`app`], with an explicit request timeout (used by tests).
+pub fn app_with_timeout(timeout: Duration) -> Router {
+    app_with_config(RuntimeConfig {
+        timeout,
+        ..RuntimeConfig::default()
+    })
+}
+
+/// Build the router with explicit EC2 / Tailscale GPU worker configuration.
+pub fn app_with_config(config: RuntimeConfig) -> Router {
+    let timeout = config.timeout;
+    let allowed_origins = Arc::new(config.allowed_origins.clone());
+    let shared = Arc::new(config);
+
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
-            local_web_origin(origin)
+        .allow_origin(AllowOrigin::predicate({
+            let allowed_origins = Arc::clone(&allowed_origins);
+            move |origin: &HeaderValue, _| {
+                local_web_origin(origin)
+                    || origin
+                        .to_str()
+                        .is_ok_and(|value| allowed_origins.iter().any(|o| o == value))
+            }
         }))
         .allow_methods([Method::GET, Method::POST])
-        .allow_headers([header::CONTENT_TYPE]);
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
+
+    let api_routes = Router::new()
+        .route(
+            "/api/v1/catalog",
+            get(|State(cfg): State<Arc<RuntimeConfig>>| async move {
+                Json(catalog_for(cfg.gpu_worker.is_some()))
+            }),
+        )
+        .route("/api/v1/preview", post(preview))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&shared),
+            require_api_token,
+        ));
+
     Router::new()
         .route(
             "/healthz",
-            get(|| async {
+            get(|State(cfg): State<Arc<RuntimeConfig>>| async move {
+                let (configured, transport) = match cfg.gpu_worker {
+                    Some(ref w) => (true, w.endpoint.transport),
+                    None => (false, WorkerTransport::None),
+                };
                 Json(Health {
                     status: "ok",
                     mode: MODE,
+                    gpu_worker: GpuWorkerHealth {
+                        configured,
+                        transport,
+                    },
                 })
             }),
         )
-        .route("/api/v1/catalog", get(|| async { Json(catalog()) }))
-        .route("/api/v1/preview", post(preview))
+        .merge(api_routes)
         .fallback(|| async {
             ApiError::new(
                 StatusCode::NOT_FOUND,
@@ -304,10 +618,27 @@ pub fn app() -> Router {
                 "This method is not supported for this route.",
             )
         })
+        .with_state(shared)
         .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            timeout,
+        ))
         .layer(cors)
         .layer(axum::middleware::map_response(
-            |mut response: Response| async move {
+            |response: Response| async move {
+                // No handler returns 408 itself; it only comes from the timeout layer, whose
+                // body is empty. Give clients the same structured error shape as other failures.
+                let mut response = if response.status() == StatusCode::REQUEST_TIMEOUT {
+                    ApiError::new(
+                        StatusCode::REQUEST_TIMEOUT,
+                        "timeout",
+                        "The request took too long. Please try again.",
+                    )
+                    .into_response()
+                } else {
+                    response
+                };
                 response
                     .headers_mut()
                     .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -321,7 +652,14 @@ pub fn app() -> Router {
 }
 
 #[derive(Serialize)]
+struct GpuWorkerHealth {
+    configured: bool,
+    transport: WorkerTransport,
+}
+
+#[derive(Serialize)]
 struct Health {
     status: &'static str,
     mode: &'static str,
+    gpu_worker: GpuWorkerHealth,
 }

@@ -1,0 +1,27 @@
+# Caddy HTTPS reverse proxy for EC2 deployment.
+# Replace {$DOMAIN:mealpreview.example.com} with your EC2 DNS name via the DOMAIN env var.
+{$DOMAIN:mealpreview.example.com} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	@api path /healthz /api/v1/*
+	handle @api {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle {
+		root * /var/www/senior-meal-preview
+		try_files {path} /index.html
+		file_server
+	}
+}
