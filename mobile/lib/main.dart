@@ -1,8 +1,9 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'models.dart';
-import 'plate.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -14,7 +15,7 @@ class MealPreviewApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'A little change',
+    title: 'Meal preview',
     debugShowCheckedModeBanner: false,
     theme: buildAppTheme(),
     home: MealFlow(api: api),
@@ -29,7 +30,7 @@ class MealFlow extends StatefulWidget {
 }
 
 class _MealFlowState extends State<MealFlow> {
-  static const _steps = ['Choose a meal', 'Make it yours', 'See the idea'];
+  static const _steps = ['Choose a meal', 'Choose changes', 'Review request'];
 
   late final MealApi _api;
   late final bool _ownsApi;
@@ -109,21 +110,6 @@ class _MealFlowState extends State<MealFlow> {
     });
   }
 
-  void _reset() {
-    ++_requestVersion;
-    setState(() {
-      _step = 0;
-      _dish = null;
-      _changes.clear();
-      _preferences = const MealPreferences();
-      _renderMode = 'illustrative_only';
-      _preview = null;
-      _submitting = false;
-      _error = null;
-    });
-    _transitionToStep();
-  }
-
   Future<void> _submit() async {
     if (_submitting) return;
     final dish = _dish;
@@ -178,6 +164,9 @@ class _MealFlowState extends State<MealFlow> {
     }
   }
 
+  bool get _pinAction =>
+      textScaleOf(context) <= 1.3 && MediaQuery.sizeOf(context).height >= 640;
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: _step == 0,
@@ -185,43 +174,65 @@ class _MealFlowState extends State<MealFlow> {
       if (!didPop && _step > 0) _goTo(_step - 1);
     },
     child: Scaffold(
+      bottomNavigationBar:
+          !_loading && _catalog != null && _pinAction && _step > 0
+          ? SafeArea(top: false, child: _actionBar())
+          : null,
       body: SafeArea(
+        bottom: false,
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(
               maxWidth: AppLayout.maxOuterWidth,
             ),
-            child: SingleChildScrollView(
-              controller: _scroll,
-              padding: AppLayout.pagePadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _header(),
-                  const SizedBox(height: 16),
-                  if (_loading)
-                    _loadingView()
-                  else if (_catalog == null)
-                    _catalogFailure()
-                  else ...[
-                    StepProgress(step: _step, labels: _steps),
-                    const SizedBox(height: 16),
-                    if (_step == 0)
-                      ..._chooseMeal()
-                    else if (_step == 1)
-                      ..._chooseChanges()
-                    else
-                      ..._showPreview(),
-                  ],
-                  const SizedBox(height: 24),
-                  const Divider(color: AppColors.divider),
-                  const SizedBox(height: 10),
-                  Text(
-                    'A local prototype · Not for coursework submission',
-                    style: Theme.of(context).textTheme.bodyMedium,
+            child: Column(
+              children: [
+                if (_step > 0) _header(),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _scroll,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: AppLayout.pagePadding,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_loading)
+                                _loadingView()
+                              else if (_catalog == null)
+                                _catalogFailure()
+                              else ...[
+                                if (_step == 0)
+                                  ..._chooseMeal()
+                                else if (_step == 1)
+                                  ..._chooseChanges()
+                                else
+                                  ..._showPreview(),
+                                if (!_pinAction && _step > 0) ...[
+                                  const SizedBox(height: 24),
+                                  _primaryAction(),
+                                ],
+                              ],
+                              const SizedBox(height: 24),
+                              if (_step == 0)
+                                TextButton(
+                                  onPressed: _showPhotoCredits,
+                                  key: const Key('photo-credits'),
+                                  child: const Text('About this demo'),
+                                ),
+                              SizedBox(
+                                height: MediaQuery.paddingOf(context).bottom,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
@@ -229,66 +240,168 @@ class _MealFlowState extends State<MealFlow> {
     ),
   );
 
-  Widget _header() => textScaleOf(context) <= AppLayout.compactMealMaxTextScale
-      ? Row(
-          children: [
-            _brandIcon(),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'A little change',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+  Widget _header() => CupertinoNavigationBar(
+    automaticallyImplyLeading: false,
+    backgroundColor: AppColors.background,
+    border: const Border(
+      bottom: BorderSide(color: AppColors.divider, width: .5),
+    ),
+    leading: NativeNavigationButton(
+      key: Key(_step == 1 ? 'back' : 'nav-back'),
+      label: _step == 1 ? 'Back to meals' : 'Back to changes',
+      visibleLabel: _step == 1 ? 'Meals' : 'Changes',
+      onPressed: () => _goTo(_step - 1),
+      back: true,
+    ),
+    middle: Text(
+      _step == 1 ? 'Edit meal' : 'Review',
+      style: AppTypography.style(17, weight: FontWeight.w600),
+    ),
+    trailing: _step == 1
+        ? CupertinoButton(
+            key: const Key('reset'),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            minimumSize: const Size(48, 48),
+            onPressed: _confirmClearChoices,
+            child: Text(
+              'Clear',
+              style: AppTypography.style(17, color: AppColors.accent),
             ),
-            if (_dish != null) _resetButton(),
-          ],
-        )
-      : Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          runSpacing: 8,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _brandIcon(),
-                const SizedBox(width: 10),
-                Flexible(
-                  child: Text(
-                    'A little change',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-              ],
-            ),
-            if (_dish != null) _resetButton(),
-          ],
-        );
+          )
+        : null,
+  );
 
-  Widget _brandIcon() => const ExcludeSemantics(
-    child: DecoratedBox(
-      decoration: BoxDecoration(color: AppColors.ink, shape: BoxShape.circle),
-      child: Padding(
-        padding: EdgeInsets.all(9),
-        child: Icon(Icons.restaurant_rounded, color: Colors.white, size: 20),
+  Future<void> _confirmClearChoices() async {
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text('Clear your choices?'),
+        content: Text(
+          'Remove the changes and preferences for ${_dish!.name.toLowerCase()}? Your meal stays selected.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            key: const Key('clear-cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep choices'),
+          ),
+          CupertinoDialogAction(
+            key: const Key('clear-confirm'),
+            isDestructiveAction: true,
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Clear choices'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    ++_requestVersion;
+    setState(() {
+      _changes.clear();
+      _preferences = const MealPreferences();
+      _preview = null;
+      _submitting = false;
+      _error = null;
+      _step = 1;
+    });
+    _transitionToStep();
+  }
+
+  Widget _actionBar() => DecoratedBox(
+    decoration: const BoxDecoration(
+      color: AppColors.surface,
+      border: Border(top: BorderSide(color: AppColors.divider, width: .5)),
+    ),
+    child: Center(
+      heightFactor: 1,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.maxOuterWidth),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: _primaryAction(),
+        ),
       ),
     ),
   );
 
-  Widget _resetButton() => TextButton.icon(
-    key: const Key('reset'),
-    onPressed: _reset,
-    icon: const Icon(Icons.restart_alt, size: 20),
-    label: const Text('Start over'),
-  );
+  Widget _primaryAction() => _step == 1
+      ? AppPrimaryButton(
+          key: const Key('submit'),
+          onPressed:
+              _submitting || _changes.length < _catalog!.selection.minChanges
+              ? null
+              : _submit,
+          busy: _submitting,
+          label: _submitting
+              ? 'Preparing…'
+              : _error != null
+              ? 'Try again'
+              : _renderMode == 'gpu_assisted'
+              ? 'Generate preview'
+              : _changes.isEmpty
+              ? 'Choose a change'
+              : 'Review ${_changes.length} ${_changes.length == 1 ? 'change' : 'changes'}',
+        )
+      : AppPrimaryButton(
+          key: const Key('edit'),
+          onPressed: () => _goTo(1),
+          label: 'Edit choices',
+        );
 
-  Widget _loadingView() => const Padding(
-    padding: EdgeInsets.symmetric(vertical: 80),
+  Future<void> _showPhotoCredits() async {
+    final credits = await rootBundle.loadString('assets/meals/ATTRIBUTION.md');
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: false,
+      enableDrag: false,
+      isDismissible: false,
+      backgroundColor: AppColors.background,
+      builder: (sheetContext) => SizedBox(
+        height: MediaQuery.sizeOf(sheetContext).height * .75,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SectionHeading('About this demo'),
+              const SizedBox(height: 10),
+              const Text(
+                'Reference photos are not edited in demo mode. A demo summary records requests, not results. Model outputs are labeled separately when available. This extension is not for coursework submission.',
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    credits.replaceAll(RegExp(r'^#+ ', multiLine: true), ''),
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              AppPrimaryButton(
+                onPressed: () => Navigator.pop(sheetContext),
+                label: 'Done',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _loadingView() => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 80),
     child: Column(
       children: [
-        CircularProgressIndicator(semanticsLabel: 'Loading meals'),
-        SizedBox(height: 24),
-        Text('Getting the meal choices…'),
+        Semantics(
+          label: 'Loading meals',
+          child: const CupertinoActivityIndicator(radius: 14),
+        ),
+        const SizedBox(height: 24),
+        const Text('Getting the meal choices…'),
       ],
     ),
   );
@@ -300,11 +413,10 @@ class _MealFlowState extends State<MealFlow> {
       const SizedBox(height: 16),
       NoticeCard(_error ?? 'Cannot load meals.', error: true),
       const SizedBox(height: 16),
-      FilledButton.icon(
+      AppPrimaryButton(
         key: const Key('retry-catalog'),
         onPressed: _loadCatalog,
-        icon: const Icon(Icons.refresh),
-        label: const Text('Try again'),
+        label: 'Try again',
       ),
       const SizedBox(height: 12),
       const Text(
@@ -314,54 +426,41 @@ class _MealFlowState extends State<MealFlow> {
   );
 
   List<Widget> _chooseMeal() => [
-    StepHeading('Choose a familiar meal', focusNode: _headingFocus),
-    const SizedBox(height: 6),
+    const SizedBox(height: 10),
+    StepHeading('Meals', focusNode: _headingFocus),
+    const SizedBox(height: 8),
     Text(
-      'Pick a demo meal, then explore one or two small serving changes.',
+      'Choose a meal to personalise.',
       style: Theme.of(context).textTheme.bodyLarge,
     ),
-    const SizedBox(height: 12),
-    const NoticeCard(
-      'These drawings are not AI results or nutrition advice.',
-      key: Key('demo-callout'),
-      title: 'Demo only',
+    const SizedBox(height: 8),
+    Text(
+      '${_catalog!.dishes.length} sample meals · Reference photos',
+      key: const Key('demo-callout'),
+      style: Theme.of(context).textTheme.bodyMedium,
     ),
-    const SizedBox(height: 14),
+    StepProgress(step: _step, labels: _steps),
+    const SizedBox(height: 24),
     for (final dish in _catalog!.dishes)
       Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.only(bottom: 14),
         child: MealCard(
           dish: dish,
           selected: _dish?.id == dish.id,
-          onSelect: () => setState(() {
-            if (_dish?.id != dish.id) {
-              _changes.clear();
-              _preferences = const MealPreferences();
-              _renderMode = 'illustrative_only';
-            }
-            _dish = dish;
-            _error = null;
-          }),
+          onSelect: () {
+            setState(() {
+              if (_dish?.id != dish.id) {
+                _changes.clear();
+                _preferences = const MealPreferences();
+                _renderMode = 'illustrative_only';
+              }
+              _dish = dish;
+              _error = null;
+            });
+            _goTo(1);
+          },
         ),
       ),
-    const SizedBox(height: 6),
-    FilledButton.icon(
-      key: const Key('continue'),
-      onPressed: _dish == null ? null : () => _goTo(1),
-      icon: const Icon(Icons.arrow_forward_rounded),
-      label: const Text('Choose my changes'),
-    ),
-    const SizedBox(height: 8),
-    Semantics(
-      liveRegion: true,
-      child: Text(
-        _dish == null
-            ? 'Choose one meal to continue.'
-            : '${_dish!.name} selected.',
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.labelMedium,
-      ),
-    ),
   ];
 
   List<Widget> _chooseChanges() {
@@ -371,296 +470,392 @@ class _MealFlowState extends State<MealFlow> {
     final singleChoiceDish = maxForDish == 1;
     final atLimit = _changes.length >= maxForDish;
     final statusText = _changes.isEmpty
-        ? '0 of $maxForDish selected. '
-              '${singleChoiceDish ? 'Choose this change to continue.' : 'Choose at least one change to continue.'}'
-        : atLimit && !singleChoiceDish
-        ? '${_changes.length} of $maxForDish selected. Remove one to choose another.'
-        : '${_changes.length} of $maxForDish selected.';
+        ? (singleChoiceDish ? 'Choose this change' : 'Choose 1 or $maxForDish')
+        : singleChoiceDish
+        ? '1 selected'
+        : 'Choose 1 or $maxForDish · ${_changes.length} selected';
     return [
-      StepHeading('Make it yours', focusNode: _headingFocus),
-      const SizedBox(height: 10),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceSubtle,
-          borderRadius: BorderRadius.circular(AppRadius.notice),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Row(
-          children: [
-            ExcludeSemantics(
-              child: SizedBox.square(
-                dimension: 40,
-                child: PlateIllustration(
-                  dish: _dish!,
-                  label: _dish!.name,
-                  aspectRatio: 1,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'For your ${_dish!.name.toLowerCase()}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-          ],
-        ),
+      StepProgress(step: _step, labels: _steps),
+      const SizedBox(height: 8),
+      MealContext(dish: _dish!),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Divider(height: 1),
       ),
-      const SizedBox(height: 18),
-      SectionHeading(
-        singleChoiceDish
-            ? 'Choose this change to see an idea'
-            : 'Choose ${rules.minChanges} or $maxForDish changes',
+      StepHeading(
+        'Choose your changes',
+        focusNode: _headingFocus,
+        style: AppTypography.style(25, weight: FontWeight.w600),
       ),
-      const SizedBox(height: 4),
+      const SizedBox(height: 6),
+      const SizedBox(height: 5),
       Semantics(
         liveRegion: true,
+        label:
+            'Choose at least ${rules.minChanges} and at most $maxForDish changes. $statusText',
         child: Text(
           statusText,
           key: const Key('change-selection-status'),
-          style: Theme.of(context).textTheme.labelMedium,
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
       ),
       const SizedBox(height: 12),
-      for (final change in changes)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: ChangeOption(
-            change: change,
-            selected: _changes.contains(change.id),
-            unavailableReason: !_changes.contains(change.id) && atLimit
-                ? 'Remove a selected change to choose this one.'
-                : null,
-            onChanged:
-                !_submitting && (_changes.contains(change.id) || !atLimit)
-                ? (checked) => setState(() {
-                    checked
-                        ? _changes.add(change.id)
-                        : _changes.remove(change.id);
-                    _error = null;
-                  })
-                : null,
+      ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.changeCard),
+        child: ColoredBox(
+          color: AppColors.surface,
+          child: Column(
+            children: [
+              for (final change in changes) ...[
+                ChangeOption(
+                  key: Key('change-${change.id}'),
+                  change: change,
+                  selected: _changes.contains(change.id),
+                  unavailableReason: !_changes.contains(change.id) && atLimit
+                      ? 'Remove a selected change to choose this one.'
+                      : null,
+                  onChanged:
+                      !_submitting && (_changes.contains(change.id) || !atLimit)
+                      ? (checked) => setState(() {
+                          checked
+                              ? _changes.add(change.id)
+                              : _changes.remove(change.id);
+                          _error = null;
+                        })
+                      : null,
+                ),
+                if (change != changes.last)
+                  const Divider(height: 1, indent: 18, endIndent: 18),
+              ],
+            ],
           ),
         ),
-      const SizedBox(height: 18),
-      const SectionHeading('Any preferences?'),
-      const SizedBox(height: 4),
-      const Text(
-        'Optional. These are requests only, not checks that a meal is safe or suitable.',
       ),
-      const SizedBox(height: 12),
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadius.changeCard),
-          border: Border.all(color: AppColors.strongOutline),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      const SizedBox(height: 24),
+      const SectionHeading('Preferences'),
+      const SizedBox(height: 10),
+      CupertinoButton(
+        key: const Key('preferences-open'),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        minimumSize: const Size(double.infinity, 64),
+        onPressed: _submitting ? null : _showPreferences,
+        child: Row(
           children: [
-            PreferenceGroup(
-              title: 'Texture',
-              helper:
-                  'A texture request only. This does not check swallowing safety.',
-              enabled: !_submitting,
-              options: [
-                PreferenceOption(
-                  label: 'No preference',
-                  key: 'texture-any',
-                  selected: _preferences.texture == 'any',
-                  onSelect: () => setState(
-                    () => _preferences = MealPreferences(
-                      flavour: _preferences.flavour,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Texture & flavour', style: AppTypography.style(18)),
+                  const SizedBox(height: 4),
+                  Text(
+                    _preferenceSummary,
+                    key: const Key('preference-summary'),
+                    style: AppTypography.style(
+                      16,
+                      color: AppColors.textSecondary,
                     ),
-                  ),
-                ),
-                PreferenceOption(
-                  label: 'Soft',
-                  key: 'texture-soft',
-                  selected: _preferences.texture == 'soft',
-                  onSelect: () => setState(
-                    () => _preferences = MealPreferences(
-                      texture: 'soft',
-                      flavour: _preferences.flavour,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 14),
-              child: Divider(color: AppColors.divider, height: 1),
-            ),
-            PreferenceGroup(
-              title: 'Flavour',
-              helper: 'A seasoning request only. Ingredients are not checked.',
-              enabled: !_submitting,
-              options: [
-                PreferenceOption(
-                  label: 'No preference',
-                  key: 'flavour-any',
-                  selected: _preferences.flavour == 'any',
-                  onSelect: () => setState(
-                    () => _preferences = MealPreferences(
-                      texture: _preferences.texture,
-                    ),
-                  ),
-                ),
-                PreferenceOption(
-                  label: 'Mild',
-                  key: 'flavour-mild',
-                  selected: _preferences.flavour == 'mild',
-                  onSelect: () => setState(
-                    () => _preferences = MealPreferences(
-                      texture: _preferences.texture,
-                      flavour: 'mild',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (_catalog!.capabilities.gpuPreview) ...[
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
-                child: Divider(color: AppColors.divider, height: 1),
-              ),
-              PreferenceGroup(
-                title: 'Preview engine',
-                helper:
-                    'GPU mode routes only meal IDs over Tailscale to the model worker; errors never fall back to fake photos.',
-                enabled: !_submitting,
-                options: [
-                  PreferenceOption(
-                    label: 'Symbolic drawing',
-                    key: 'render-illustrative',
-                    selected: _renderMode == 'illustrative_only',
-                    onSelect: () =>
-                        setState(() => _renderMode = 'illustrative_only'),
-                  ),
-                  PreferenceOption(
-                    label: 'Tailscale GPU model',
-                    key: 'render-gpu',
-                    selected: _renderMode == 'gpu_assisted',
-                    onSelect: () =>
-                        setState(() => _renderMode = 'gpu_assisted'),
                   ),
                 ],
               ),
-            ],
+            ),
+            const SizedBox(width: 12),
+            const AppChevron(),
           ],
         ),
+      ),
+      const SizedBox(height: 16),
+      Text(
+        _renderMode == 'gpu_assisted'
+            ? 'AI preview · Results are not clinically verified.'
+            : 'Demo mode · Review your request without generating a photo.',
+        style: Theme.of(context).textTheme.bodyMedium,
       ),
       const SizedBox(height: 20),
       if (_error != null) ...[
         NoticeCard(_error!, key: const Key('submit-error'), error: true),
         const SizedBox(height: 14),
       ],
-      FilledButton.icon(
-        key: const Key('submit'),
-        onPressed: _submitting || _changes.length < rules.minChanges
-            ? null
-            : _submit,
-        icon: _submitting
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  semanticsLabel: 'Preparing your meal idea',
-                ),
-              )
-            : const Icon(Icons.visibility_outlined),
-        label: Text(
-          _submitting
-              ? 'Preparing your meal idea…'
-              : _error != null
-              ? 'Try preview again'
-              : 'See my meal idea',
-        ),
-      ),
-      const SizedBox(height: 10),
-      OutlinedButton.icon(
-        key: const Key('back'),
-        onPressed: () => _goTo(0),
-        icon: const Icon(Icons.arrow_back),
-        label: const Text('Back to meals'),
-      ),
     ];
   }
 
+  String get _preferenceSummary {
+    final values = <String>[
+      if (_preferences.texture != 'any') 'Soft texture',
+      if (_preferences.flavour != 'any') 'Mild flavour',
+    ];
+    if (_catalog!.capabilities.gpuPreview) {
+      values.add(_renderMode == 'gpu_assisted' ? 'AI preview' : 'Demo');
+    }
+    return values.isEmpty ? 'Optional · No preference' : values.join(' · ');
+  }
+
+  Future<void> _showPreferences() async {
+    var draftPreferences = _preferences;
+    var draftMode = _renderMode;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: false,
+      enableDrag: false,
+      isDismissible: false,
+      backgroundColor: AppColors.background,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, refresh) {
+          return FractionallySizedBox(
+            heightFactor:
+                textScaleOf(context) > 1.3 || _catalog!.capabilities.gpuPreview
+                ? .9
+                : .78,
+            child: SafeArea(
+              top: false,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                    child: textScaleOf(context) > 1.3
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: _cancelPreferences(sheetContext),
+                              ),
+                              Text(
+                                'Preferences',
+                                style: AppTypography.style(
+                                  24,
+                                  weight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Preferences',
+                                  style: AppTypography.style(
+                                    24,
+                                    weight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              _cancelPreferences(sheetContext),
+                            ],
+                          ),
+                  ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      child: _preferenceControls(
+                        draftPreferences,
+                        draftMode,
+                        (value) => refresh(() => draftPreferences = value),
+                        (value) => refresh(() => draftMode = value),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                    child: AppPrimaryButton(
+                      key: const Key('preferences-done'),
+                      label: 'Use preferences',
+                      onPressed: () {
+                        setState(() {
+                          _preferences = draftPreferences;
+                          _renderMode = draftMode;
+                        });
+                        Navigator.pop(sheetContext);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _cancelPreferences(BuildContext sheetContext) => CupertinoButton(
+    key: const Key('preferences-cancel'),
+    minimumSize: const Size(48, 48),
+    onPressed: () => Navigator.pop(sheetContext),
+    child: Text(
+      'Cancel',
+      style: AppTypography.style(17, color: AppColors.accent),
+    ),
+  );
+
+  Widget _preferenceControls(
+    MealPreferences preferences,
+    String renderMode,
+    ValueChanged<MealPreferences> onPreferences,
+    ValueChanged<String> onMode,
+  ) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.changeCard),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PreferenceGroup(
+          title: 'Texture',
+          helper:
+              'A texture request only. This does not check swallowing safety.',
+          enabled: !_submitting,
+          options: [
+            PreferenceOption(
+              label: 'No preference',
+              key: 'texture-any',
+              selected: preferences.texture == 'any',
+              onSelect: () =>
+                  onPreferences(MealPreferences(flavour: preferences.flavour)),
+            ),
+            PreferenceOption(
+              label: 'Soft',
+              key: 'texture-soft',
+              selected: preferences.texture == 'soft',
+              onSelect: () => onPreferences(
+                MealPreferences(texture: 'soft', flavour: preferences.flavour),
+              ),
+            ),
+          ],
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 14),
+          child: Divider(color: AppColors.divider, height: 1),
+        ),
+        PreferenceGroup(
+          title: 'Flavour',
+          helper: 'Ingredients are not checked.',
+          enabled: !_submitting,
+          options: [
+            PreferenceOption(
+              label: 'No preference',
+              key: 'flavour-any',
+              selected: preferences.flavour == 'any',
+              onSelect: () =>
+                  onPreferences(MealPreferences(texture: preferences.texture)),
+            ),
+            PreferenceOption(
+              label: 'Mild',
+              key: 'flavour-mild',
+              selected: preferences.flavour == 'mild',
+              onSelect: () => onPreferences(
+                MealPreferences(texture: preferences.texture, flavour: 'mild'),
+              ),
+            ),
+          ],
+        ),
+        if (_catalog!.capabilities.gpuPreview) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: Divider(color: AppColors.divider, height: 1),
+          ),
+          PreferenceGroup(
+            title: 'Preview mode',
+            helper:
+                'GPU mode routes only meal IDs over Tailscale to the model worker; errors never fall back to fake photos.',
+            enabled: !_submitting,
+            options: [
+              PreferenceOption(
+                label: 'Demo summary',
+                key: 'render-illustrative',
+                selected: renderMode == 'illustrative_only',
+                onSelect: () => onMode('illustrative_only'),
+              ),
+              PreferenceOption(
+                label: 'AI preview',
+                key: 'render-gpu',
+                selected: renderMode == 'gpu_assisted',
+                onSelect: () => onMode('gpu_assisted'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    ),
+  );
+
   List<Widget> _showPreview() {
     final preview = _preview!;
-    final requestedIds = preview.targets.map((t) => t.id).toList();
     return [
-      StepHeading('Your requested meal idea', focusNode: _headingFocus),
-      const SizedBox(height: 6),
-      Text(preview.summary, style: Theme.of(context).textTheme.bodyLarge),
-      const SizedBox(height: 14),
-      const NoticeCard(
-        'These drawings do not show a real meal or an AI result. Nutrition, texture, allergens and clinical safety have not been checked.',
-        key: Key('preview-disclosure'),
-        title: 'Illustration only',
+      StepProgress(step: _step, labels: _steps),
+      const SizedBox(height: 8),
+      StepHeading(
+        preview.gpuArtifact == null ? 'Your meal request' : 'Your preview',
+        focusNode: _headingFocus,
+        style: AppTypography.editorial,
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: 12),
+      Text(
+        preview.gpuArtifact == null
+            ? 'Demo summary · No model was run'
+            : 'AI-generated preview',
+        key: const Key('preview-disclosure'),
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      const SizedBox(height: 24),
+      if (preview.gpuArtifact != null) ...[
+        GpuPreviewCard(artifact: preview.gpuArtifact!),
+        const SizedBox(height: 20),
+      ] else ...[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: AspectRatio(
+            aspectRatio: 2.1,
+            child: MealArtwork(dish: preview.dish),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Reference photo · Unchanged',
+          key: const Key('reference-unchanged'),
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          preview.dish.name,
+          style: AppTypography.style(24, weight: FontWeight.w600),
+        ),
+        const SizedBox(height: 24),
+      ],
       RequestSummary(
         targets: preview.targets,
         preferences: preview.preferences,
       ),
-      const SizedBox(height: 14),
-      if (preview.gpuArtifact != null) ...[
-        GpuPreviewCard(artifact: preview.gpuArtifact!),
-        const SizedBox(height: 14),
-      ],
-      LayoutBuilder(
-        builder: (context, constraints) {
-          final original = PlateCard(
-            key: const Key('plate-original'),
-            title: 'Original idea',
-            dish: preview.dish,
-          );
-          final requested = PlateCard(
-            key: const Key('plate-requested'),
-            title: 'Requested idea',
-            dish: preview.dish,
-            changeIds: requestedIds,
-          );
-          return constraints.maxWidth >=
-                  AppLayout.comparisonColumnsMinInnerWidth
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: original),
-                    const SizedBox(width: 16),
-                    Expanded(child: requested),
-                  ],
-                )
-              : Column(
-                  children: [original, const SizedBox(height: 14), requested],
-                );
-        },
-      ),
       const SizedBox(height: 18),
-      for (final notice in preview.notices)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: NoticeCard(notice),
-        ),
-      const SizedBox(height: 14),
-      FilledButton.icon(
-        key: const Key('edit'),
-        onPressed: () => _goTo(1),
-        icon: const Icon(Icons.edit_outlined),
-        label: const Text('Change my choices'),
+      Text(
+        'Nutrition, texture, allergens and clinical safety are unverified.',
+        style: Theme.of(context).textTheme.bodyMedium,
       ),
+      for (final notice in preview.notices.where(
+        (notice) =>
+            notice != 'Prototype only. No model was run.' &&
+            notice != 'Preferences are requests, not verified properties.',
+      )) ...[
+        const SizedBox(height: 8),
+        Text(notice, style: Theme.of(context).textTheme.bodyMedium),
+      ],
       const SizedBox(height: 10),
-      OutlinedButton.icon(
+      CupertinoButton(
         key: const Key('new-meal'),
-        onPressed: _reset,
-        icon: const Icon(Icons.restart_alt),
-        label: const Text('Try another meal'),
+        onPressed: () => _goTo(0),
+        color: AppColors.surfaceSubtle,
+        borderRadius: BorderRadius.circular(AppRadius.button),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        minimumSize: const Size(double.infinity, 56),
+        child: Text(
+          'Choose another meal',
+          style: AppTypography.style(17, color: AppColors.accent),
+        ),
       ),
     ];
   }

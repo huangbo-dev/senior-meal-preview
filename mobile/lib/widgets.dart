@@ -1,9 +1,9 @@
 import 'dart:convert';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'models.dart';
-import 'plate.dart';
 import 'theme.dart';
 
 /// Plain-language information or error box. Errors are live regions so they are
@@ -18,7 +18,7 @@ class NoticeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = error ? AppColors.errorText : AppColors.ink;
+    final color = error ? AppColors.errorText : AppColors.textSecondary;
     final style = Theme.of(
       context,
     ).textTheme.bodyMedium!.copyWith(color: color);
@@ -26,13 +26,13 @@ class NoticeCard extends StatelessWidget {
       liveRegion: error,
       container: true,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        padding: error
+            ? const EdgeInsets.all(14)
+            : const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
-          color: error ? AppColors.errorSurface : AppColors.noticeSurface,
+          color: error ? AppColors.errorSurface : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.notice),
-          border: Border.all(
-            color: error ? AppColors.errorIcon : AppColors.divider,
-          ),
+          border: error ? Border.all(color: AppColors.errorIcon) : null,
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -42,7 +42,7 @@ class NoticeCard extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 2),
                 child: Icon(
                   error ? Icons.error_outline : Icons.info_outline,
-                  color: error ? AppColors.errorIcon : AppColors.ink,
+                  color: error ? AppColors.errorIcon : AppColors.textSecondary,
                   size: 22,
                 ),
               ),
@@ -71,51 +71,151 @@ class NoticeCard extends StatelessWidget {
   }
 }
 
-/// "Step 2 of 3 · Make it yours" plus a three-segment bar. Read as one phrase.
+/// Progress remains available to assistive technology without repeating the title.
 class StepProgress extends StatelessWidget {
   const StepProgress({super.key, required this.step, required this.labels});
   final int step;
   final List<String> labels;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Step ${step + 1} of ${labels.length}: ${labels[step]}',
+    child: const SizedBox.shrink(),
+  );
+}
+
+/// Cupertino press behavior with a single, consistent primary-action treatment.
+class AppPrimaryButton extends StatelessWidget {
+  const AppPrimaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.busy = false,
+  });
+  final String label;
+  final VoidCallback? onPressed;
+  final bool busy;
+  @override
+  Widget build(BuildContext context) => CupertinoButton(
+    onPressed: onPressed,
+    color: AppColors.accent,
+    disabledColor: const Color(0xFFE0E4DC),
+    borderRadius: BorderRadius.circular(AppRadius.button),
+    minimumSize: const Size(double.infinity, 56),
+    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (busy) ...[
+          const CupertinoActivityIndicator(),
+          const SizedBox(width: 12),
+        ],
+        Flexible(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: AppTypography.style(
+              18,
+              weight: FontWeight.w500,
+              color: onPressed == null ? AppColors.textSecondary : Colors.white,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class NativeNavigationButton extends StatelessWidget {
+  const NativeNavigationButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.back = false,
+    this.onPhoto = false,
+    this.visibleLabel,
+  });
+  final String? visibleLabel;
+  final String label;
+  final VoidCallback onPressed;
+  final bool back;
+  final bool onPhoto;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    button: true,
+    onTap: onPressed,
+    child: ExcludeSemantics(
+      child: CupertinoButton(
+        onPressed: onPressed,
+        minimumSize: const Size(48, 48),
+        padding: EdgeInsets.symmetric(horizontal: back ? 12 : 18, vertical: 12),
+        color: onPhoto ? Colors.white.withValues(alpha: .95) : null,
+        borderRadius: BorderRadius.circular(28),
+        child: back
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 20,
+                    height: 24,
+                    child: CustomPaint(painter: _ChevronPainter()),
+                  ),
+                  if (!onPhoto) ...[
+                    const SizedBox(width: 5),
+                    Text(visibleLabel ?? label, style: AppTypography.style(17)),
+                  ],
+                ],
+              )
+            : Text(
+                label == 'Start over' ? 'Reset' : label,
+                style: AppTypography.style(17, color: AppColors.textSecondary),
+              ),
+      ),
+    ),
+  );
+}
+
+class _ChevronPainter extends CustomPainter {
+  const _ChevronPainter({this.forward = false, this.color = AppColors.ink});
+  final bool forward;
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    if (forward) {
+      canvas.translate(size.width, 0);
+      canvas.scale(-1, 1);
+    }
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(
+      Path()
+        ..moveTo(15, 4)
+        ..lineTo(7, 12)
+        ..lineTo(15, 20),
+      paint,
+    );
+    canvas.restore();
+  }
 
   @override
-  Widget build(BuildContext context) {
-    final text = 'Step ${step + 1} of ${labels.length} · ${labels[step]}';
-    return Semantics(
-      label: 'Step ${step + 1} of ${labels.length}: ${labels[step]}',
-      child: ExcludeSemantics(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              text,
-              key: const Key('progress-label'),
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: List.generate(
-                labels.length,
-                (i) => Expanded(
-                  child: Container(
-                    height: 6,
-                    margin: EdgeInsets.only(
-                      right: i == labels.length - 1 ? 0 : 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: i <= step
-                          ? AppColors.ink
-                          : AppColors.progressInactive,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  bool shouldRepaint(covariant _ChevronPainter oldDelegate) =>
+      oldDelegate.forward != forward || oldDelegate.color != color;
+}
+
+class AppChevron extends StatelessWidget {
+  const AppChevron({super.key, this.color = AppColors.textSecondary});
+  final Color color;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 20,
+    height: 24,
+    child: CustomPaint(painter: _ChevronPainter(forward: true, color: color)),
+  );
 }
 
 /// A semantic heading that can receive keyboard focus programmatically (when a new
@@ -156,9 +256,39 @@ class SectionHeading extends StatelessWidget {
   );
 }
 
-/// Selectable meal. Narrow widths use a compact horizontal card; large text stacks the
-/// illustration above the text; wide layouts keep a larger side illustration.
-class MealCard extends StatefulWidget {
+/// Catalog artwork is reference material, never the result of a meal edit.
+/// The schematic fallback remains explicit and does not fake a model response.
+class MealArtwork extends StatelessWidget {
+  const MealArtwork({super.key, required this.dish});
+  final Dish dish;
+
+  @override
+  Widget build(BuildContext context) => Image.asset(
+    'assets/meals/${dish.id}.jpg',
+    fit: BoxFit.cover,
+    filterQuality: FilterQuality.high,
+    width: double.infinity,
+    semanticLabel:
+        'Reference photo of ${dish.id == 'tofu_rice' ? 'tofu and vegetables' : dish.name}. Not a meal-preview result.',
+    errorBuilder: (context, error, stackTrace) => ColoredBox(
+      color: AppColors.surfaceSubtle,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'Photo unavailable',
+            textAlign: TextAlign.center,
+            style: AppTypography.style(16, color: AppColors.textSecondary),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Compact photo collection, with a dark scrim that guarantees title contrast.
+/// All three demo meals fit on an ordinary phone; large text uses natural height.
+class MealCard extends StatelessWidget {
   const MealCard({
     super.key,
     required this.dish,
@@ -169,140 +299,138 @@ class MealCard extends StatefulWidget {
   final bool selected;
   final VoidCallback onSelect;
 
-  @override
-  State<MealCard> createState() => _MealCardState();
-}
-
-class _MealCardState extends State<MealCard> {
-  bool _focused = false;
+  String get subtitle => switch (dish.id) {
+    'chicken_rice' => 'Chicken, rice & cucumber',
+    'fish_soup' => 'Fish, greens & broth',
+    'tofu_rice' => 'Tofu & vegetables pictured',
+    _ => 'Reference photo',
+  };
 
   @override
   Widget build(BuildContext context) {
-    final dish = widget.dish;
-    final selected = widget.selected;
-    final textScale = textScaleOf(context);
+    final large = textScaleOf(context) > 1.3;
+    final caption = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  dish.name,
+                  style: AppTypography.style(
+                    20,
+                    weight: FontWeight.w600,
+                    color: large ? AppColors.ink : Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: AppTypography.style(
+                    16,
+                    color: large ? AppColors.textSecondary : Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          AppChevron(color: large ? AppColors.ink : Colors.white),
+        ],
+      ),
+    );
     return Semantics(
       key: Key('meal-semantics-${dish.id}'),
       button: true,
-      selected: selected,
-      inMutuallyExclusiveGroup: true,
-      label: '${dish.name}. ${dish.description}',
-      // Visible focus ring outside the card edge, independent of selection.
-      child: Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: _focused ? AppColors.ink : Colors.transparent,
-            width: 3,
-          ),
-          borderRadius: BorderRadius.circular(AppRadius.mealCard + 4),
-        ),
-        child: Material(
-          color: selected ? AppColors.cardSelected : AppColors.surface,
-          shape: RoundedRectangleBorder(
+      onTap: onSelect,
+      label: '${dish.name}. $subtitle. Reference photo. Open demo meal.',
+      child: ExcludeSemantics(
+        child: CupertinoButton(
+          key: Key('dish-${dish.id}'),
+          padding: EdgeInsets.zero,
+          onPressed: onSelect,
+          child: ClipRRect(
             borderRadius: BorderRadius.circular(AppRadius.mealCard),
-            side: BorderSide(
-              color: selected ? AppColors.ink : AppColors.strongOutline,
-              width: selected ? 2 : 1,
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            key: Key('dish-${dish.id}'),
-            onTap: widget.onSelect,
-            onFocusChange: (focused) => setState(() => _focused = focused),
-            child: ExcludeSemantics(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final info = _info(context, selected);
-                    if (constraints.maxWidth >=
-                        AppLayout.mealRowMinInnerWidth) {
-                      return Row(
-                        children: [
-                          SizedBox(
-                            width: 140,
-                            child: PlateIllustration(
-                              dish: dish,
-                              label: 'Demo meal',
-                            ),
-                          ),
-                          const SizedBox(width: 20),
-                          Expanded(child: info),
-                        ],
-                      );
-                    }
-                    if (textScale <= AppLayout.compactMealMaxTextScale) {
-                      return Row(
-                        key: Key('meal-compact-${dish.id}'),
-                        children: [
-                          SizedBox.square(
-                            dimension: AppLayout.compactMealIllustration,
-                            child: PlateIllustration(
-                              dish: dish,
-                              label: 'Demo meal',
-                              aspectRatio: 1,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(child: info),
-                        ],
-                      );
-                    }
-                    return Column(
-                      key: Key('meal-stacked-${dish.id}'),
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: large
+                ? Column(
+                    key: Key('meal-stacked-${dish.id}'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 2.4,
+                        child: MealArtwork(dish: dish),
+                      ),
+                      ColoredBox(color: AppColors.surface, child: caption),
+                    ],
+                  )
+                : SizedBox(
+                    key: Key('meal-compact-${dish.id}'),
+                    height: 156,
+                    child: Stack(
+                      fit: StackFit.expand,
                       children: [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: SizedBox(
-                            height: 92,
-                            child: PlateIllustration(
-                              dish: dish,
-                              label: 'Demo meal',
+                        MealArtwork(dish: dish),
+                        const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Color(0x00000000),
+                                Color(0x1A000000),
+                                Color(0xB3000000),
+                                Color(0xE6000000),
+                              ],
+                              stops: [0, .38, .6, 1],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        info,
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: caption,
+                        ),
                       ],
-                    );
-                  },
-                ),
-              ),
-            ),
+                    ),
+                  ),
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _info(BuildContext context, bool selected) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+/// Stable selected-meal context; image scale never competes with editing controls.
+class MealContext extends StatelessWidget {
+  const MealContext({super.key, required this.dish});
+  final Dish dish;
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.center,
     children: [
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Text(
-              widget.dish.name,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Icon(
-            selected ? Icons.check_circle : Icons.radio_button_unchecked,
-            color: selected ? AppColors.ink : AppColors.strongOutline,
-            size: 26,
-          ),
-        ],
+      ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(width: 76, height: 76, child: MealArtwork(dish: dish)),
       ),
-      const SizedBox(height: 3),
-      Text(widget.dish.description),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              dish.name,
+              style: AppTypography.style(22, weight: FontWeight.w600),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              'Reference photo',
+              style: AppTypography.style(16, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      ),
     ],
   );
 }
@@ -318,47 +446,84 @@ class ChangeOption extends StatelessWidget {
   });
   final MealChange change;
   final bool selected;
-
-  /// Null disables the row.
+  bool get value => selected;
   final ValueChanged<bool>? onChanged;
-
-  /// Visible explanation shown when the row is disabled because of the limit.
   final String? unavailableReason;
-
   @override
-  Widget build(BuildContext context) => Material(
-    color: selected ? AppColors.cardSelected : AppColors.surface,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadius.changeCard),
-      side: BorderSide(
-        color: selected ? AppColors.ink : AppColors.strongOutline,
-        width: selected ? 2 : 1,
-      ),
-    ),
-    child: CheckboxListTile(
-      key: Key('change-${change.id}'),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      controlAffinity: ListTileControlAffinity.leading,
-      value: selected,
-      onChanged: onChanged == null
-          ? null
-          : (checked) => onChanged!(checked == true),
-      title: Text(change.label, style: Theme.of(context).textTheme.titleMedium),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 3),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(change.description),
-            if (unavailableReason != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                unavailableReason!,
-                key: Key('unavailable-${change.id}'),
-                style: Theme.of(context).textTheme.labelMedium,
+  Widget build(BuildContext context) => Semantics(
+    checked: selected,
+    enabled: onChanged != null,
+    onTap: onChanged == null ? null : () => onChanged!(!selected),
+    label: '${change.label}. ${change.description}',
+    hint: selected
+        ? 'Remove this change.'
+        : (unavailableReason ?? 'Select this change.'),
+    child: ExcludeSemantics(
+      child: ColoredBox(
+        key: Key('choice-surface-${change.id}'),
+        color: selected ? AppColors.cardSelected : AppColors.surface,
+        child: CupertinoButton(
+          onPressed: onChanged == null ? null : () => onChanged!(!selected),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          minimumSize: const Size(double.infinity, 76),
+          child: Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: selected
+                        ? AppColors.accent
+                        : AppColors.strongOutline,
+                    width: 1.6,
+                  ),
+                ),
+                child: selected
+                    ? const Icon(
+                        Icons.check_rounded,
+                        size: 22,
+                        color: Colors.white,
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      change.label,
+                      style: AppTypography.style(
+                        18,
+                        weight: selected ? FontWeight.w600 : FontWeight.w400,
+                        color: onChanged == null
+                            ? AppColors.textSecondary
+                            : AppColors.ink,
+                      ),
+                    ),
+                    if (selected) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        'Selected · Tap to remove',
+                        key: Key('selected-feedback-${change.id}'),
+                        style: AppTypography.style(16, color: AppColors.accent),
+                      ),
+                    ] else if (unavailableReason != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        unavailableReason!,
+                        key: Key('unavailable-${change.id}'),
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ],
-          ],
+          ),
         ),
       ),
     ),
@@ -393,43 +558,97 @@ class PreferenceGroup extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    explicitChildNodes: true,
-    label: '$title, optional',
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ExcludeSemantics(
-          child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: AppTypography.style(18, weight: FontWeight.w600)),
+      const SizedBox(height: 10),
+      DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppColors.surfaceSubtle,
+          borderRadius: BorderRadius.circular(13),
         ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 10,
-          runSpacing: 8,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: textScaleOf(context) <= 1.3
+              ? Row(
+                  children: [
+                    for (final option in options)
+                      Expanded(
+                        child: PreferenceChoice(
+                          key: Key(option.key),
+                          option: option,
+                          enabled: enabled,
+                        ),
+                      ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final option in options)
+                      PreferenceChoice(
+                        key: Key(option.key),
+                        option: option,
+                        enabled: enabled,
+                      ),
+                  ],
+                ),
+        ),
+      ),
+      const SizedBox(height: 8),
+      Text(helper, style: Theme.of(context).textTheme.bodyMedium),
+    ],
+  );
+}
+
+class PreferenceChoice extends StatelessWidget {
+  const PreferenceChoice({
+    super.key,
+    required this.option,
+    required this.enabled,
+  });
+  final PreferenceOption option;
+  final bool enabled;
+  bool get selected => option.selected;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    selected: selected,
+    inMutuallyExclusiveGroup: true,
+    label: option.label,
+    child: CupertinoButton(
+      onPressed: enabled ? option.onSelect : null,
+      minimumSize: const Size(48, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      color: selected ? AppColors.accent : null,
+      borderRadius: BorderRadius.circular(10),
+      child: ExcludeSemantics(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            for (final option in options)
-              Semantics(
-                inMutuallyExclusiveGroup: true,
-                child: ChoiceChip(
-                  key: Key(option.key),
-                  label: Text(option.label),
-                  selected: option.selected,
-                  onSelected: enabled ? (_) => option.onSelect() : null,
-                  selectedColor: AppColors.chipSelected,
-                  materialTapTargetSize: MaterialTapTargetSize.padded,
+            if (selected) ...[
+              const Icon(Icons.check_rounded, size: 19, color: Colors.white),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                option.label,
+                textAlign: TextAlign.center,
+                style: AppTypography.style(
+                  18,
+                  weight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: selected ? Colors.white : AppColors.ink,
                 ),
               ),
+            ),
           ],
         ),
-        const SizedBox(height: 6),
-        Text(helper),
-      ],
+      ),
     ),
   );
 }
 
-/// The exact requested changes and preferences, shown before the illustrations.
+/// The exact requested changes and preferences, with no claim they were applied.
 /// Neutral bullets: nothing here has been verified, only requested.
 class RequestSummary extends StatelessWidget {
   const RequestSummary({
@@ -443,16 +662,15 @@ class RequestSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     key: const Key('request-summary'),
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(AppRadius.changeCard),
-      border: Border.all(color: AppColors.strongOutline),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeading('What you requested'),
+        const SectionHeading('Requested changes'),
         const SizedBox(height: 10),
         for (final target in targets)
           Padding(
@@ -466,14 +684,16 @@ class RequestSummary extends StatelessWidget {
                     target.label,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  Text(target.description),
                 ],
               ),
             ),
           ),
-        _bulleted(context, Text(preferences.textureLabel)),
-        const SizedBox(height: 3),
-        _bulleted(context, Text(preferences.flavourLabel)),
+        if (preferences.texture != 'any')
+          _bulleted(context, Text(preferences.textureLabel)),
+        if (preferences.flavour != 'any') ...[
+          const SizedBox(height: 3),
+          _bulleted(context, Text(preferences.flavourLabel)),
+        ],
       ],
     ),
   );
@@ -490,62 +710,6 @@ class RequestSummary extends StatelessWidget {
       Expanded(child: child),
     ],
   );
-}
-
-/// One labelled illustration in the original/requested comparison.
-class PlateCard extends StatelessWidget {
-  const PlateCard({
-    super.key,
-    required this.title,
-    required this.dish,
-    this.changeIds = const [],
-  });
-  final String title;
-  final Dish dish;
-  final List<String> changeIds;
-
-  @override
-  Widget build(BuildContext context) {
-    final isRequested = changeIds.isNotEmpty;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isRequested
-            ? AppColors.cardSelected
-            : AppColors.plateCardSurface,
-        borderRadius: BorderRadius.circular(AppRadius.plateCard),
-        border: Border.all(
-          color: isRequested ? AppColors.ink : AppColors.strongOutline,
-          width: isRequested ? 2 : 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadius.notice),
-              border: Border.all(color: AppColors.divider),
-            ),
-            child: PlateIllustration(
-              dish: dish,
-              changeIds: changeIds,
-              label: title,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(dish.name, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 2),
-          const Text('Simulated plate illustration'),
-        ],
-      ),
-    );
-  }
 }
 
 /// Displays an optional GPU worker preview returned over Tailscale, with full
@@ -567,13 +731,12 @@ class GpuPreviewCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.plateCardSurface,
         borderRadius: BorderRadius.circular(AppRadius.plateCard),
-        border: Border.all(color: AppColors.strongOutline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Tailscale GPU model preview',
+            'Generated preview',
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 10),
@@ -581,9 +744,8 @@ class GpuPreviewCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadius.notice),
             child: Image.memory(
               bytes,
-              height: 170,
               width: double.infinity,
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
               semanticLabel: artifact.generatedLabel,
             ),
           ),
