@@ -40,7 +40,7 @@
 - [`gpu-worker/gpu_worker.py`](gpu-worker/gpu_worker.py) & [`gpu-worker/test_gpu_worker.py`](gpu-worker/test_gpu_worker.py):
   - Binds strictly to Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) or loopback (`127.0.0.1`), verifies `Authorization: Bearer <MODEL_WORKER_TOKEN>` in constant time, and validates dish/change IDs.
   - `--mode dry-run` returns a deterministic test PNG fixture (`provider: "tailscale-gpu-dry-run"`, `model: "dry_run_fixture"`).
-  - `--mode gpu` executes either `WORKER_GPU_CMD` or the `sgedit` BrushNet + Qwen2.5-VL check-and-retry loop against dish fixtures in `WORKER_FIXTURE_DIR`, and **fails closed** with HTTP `503 gpu_pipeline_unready` if GPU fixtures/weights are missing.
+  - `--mode gpu` executes either `WORKER_GPU_CMD` or the `sgedit` BrushNet + Qwen2.5-VL check-and-retry loop against dish fixtures in `WORKER_FIXTURE_DIR`, and **fails closed** with HTTP `503 gpu_pipeline_unready` if GPU fixtures/weights are missing. The built-in loop calls the research contracts (`Editor`, `Runner.candidate`, `base_spec`, `next_spec`, `CheckerClient`) for one edit per request (`brown_rice` or `extra_vegetables` on `chicken_rice`/`tofu_rice`); it is covered by model-free contract tests and has not yet run on a GPU.
 - [`deploy/`](deploy/): Contains `predeploy-check.sh`, `Dockerfile.backend`, `Caddyfile`, `docker-compose.ec2.yml`, `systemd/senior-meal-preview-backend.service`, `systemd/senior-meal-preview-gpu-worker.service`, `env/*.example`, `tailscale-acl.hujson`, `deploy-ec2.sh`, and `deploy-gpu-worker.sh`.
 
 ## 4. Verification Commands (Run First on Pickup)
@@ -63,7 +63,7 @@ python3 scripts/smoke.py
 1. **Execute the 5-Phase Rollout in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#4-next-week-rollout-schedule--cutover-runbook)**:
    - **Phase 0**: Run `./deploy/predeploy-check.sh`, generate `APP_API_TOKEN` and `MODEL_WORKER_TOKEN`, and apply `deploy/tailscale-acl.hujson`.
    - **Phase 1**: Bring up Tailscale (`tag:gpu-meal-worker` and `tag:ec2-meal-gateway`) and verify `WORKER_MODE=dry-run` across the `tailscale0` tunnel.
-   - **Phase 2**: Populate `/opt/senior-meal-preview/fixtures/<dish_id>/{input.png,mask_<change_id>.png}` on the GPU server (or set `WORKER_GPU_CMD`), switch to `WORKER_MODE=gpu`, and verify `/healthz` reports `"gpu_ready": true`.
+   - **Phase 2**: Populate `/opt/senior-meal-preview/fixtures/<dish_id>/{input.png,mask_rice.png}` on the GPU server (or set `WORKER_GPU_CMD`), switch to `WORKER_MODE=gpu`, and verify `/healthz` reports `"gpu_ready": true`.
    - **Phase 3**: Deploy the EC2 gateway + Caddy TLS (`./deploy/deploy-ec2.sh`) and run `dart run tool/smoke_api.dart https://<DOMAIN> --expect-gpu`.
    - **Phase 4**: Build and distribute the production Web/Android/iOS artifacts and run the 60-second GPU worker outage drill.
 2. **Native assistive-technology validation (`A11` in `docs/UI_ACCEPTANCE.md`)**:

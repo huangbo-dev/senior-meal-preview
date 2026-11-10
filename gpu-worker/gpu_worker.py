@@ -11,9 +11,20 @@ Modes:
   `provider="tailscale-gpu-dry-run"` and `model="dry_run_fixture"` for Tailscale
   connectivity and smoke tests.
 - `gpu`: Invokes either an external GPU runner (`WORKER_GPU_CMD`) or the repo's
-  `sgedit` BrushNet + Qwen2.5-VL check-and-retry pipeline against verified dish
-  fixtures in `WORKER_FIXTURE_DIR`. Fails closed with HTTP 503 if GPU fixtures or
-  weights are unavailable (never silently falls back to a synthetic dry-run image).
+  `sgedit` BrushNet + Qwen2.5-VL check-and-retry pipeline against dish fixtures
+  in `WORKER_FIXTURE_DIR`. Fails closed with HTTP 503 if GPU fixtures or weights
+  are unavailable (never silently falls back to a synthetic dry-run image).
+
+The built-in `sgedit` path uses the research code's own contracts
+(`sgedit.editor.Editor`, `sgedit.loop.Runner.candidate`, `base_spec`,
+`next_spec`, `CheckerClient`, `POLICY`) and only the two research tasks, one
+edit per request:
+  brown_rice        -> T2    (replace white rice with brown rice)
+  extra_vegetables  -> T1-B  (add cooked broccoli, staple stays visible)
+for dishes with a rice fixture (`<dish>/input.png` + `<dish>/mask_rice.png`,
+both 1024x1024). Anything else returns HTTP 422 `unsupported_by_validated_model`.
+`checker_passed` is the selector's verdict on the selected candidate; it is not
+an independent evaluation.
 """
 
 from __future__ import annotations
@@ -30,10 +41,14 @@ import shlex
 import struct
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 ALLOWED_DISHES = {"chicken_rice", "fish_soup", "tofu_rice"}
 ALLOWED_CHANGES = {"extra_vegetables", "brown_rice", "sauce_on_side"}
@@ -48,11 +63,14 @@ PROMPT_MAP = {
     ("fish_soup", ("extra_vegetables",)): "t1b_fish_soup_greens",
 }
 
-CHANGE_TO_TASK = {
-    "extra_vegetables": ("T1b", "steamed broccoli", "broccoli"),
-    "brown_rice": ("T2", "brown rice", "rice"),
-    "sauce_on_side": ("T1b", "small saucer of light soy sauce on the side", "sauce"),
-}
+# Built-in sgedit path: research task per change, and the staple ("source") each dish fixture carries.
+BUILTIN_TASKS = {"brown_rice": "T2", "extra_vegetables": "T1-B"}
+BUILTIN_SOURCES = {"chicken_rice": "rice", "tofu_rice": "rice"}
+FIXTURE_SIDE = 1024
+PROMPT_SET = "tuned"
+DEFAULT_CHECKER_URL = "http://127.0.0.1:8781"
+# The Rust gateway rejects worker responses over 4 MiB; keep the preview well inside that.
+MAX_IMAGE_DATA_URL_BYTES = 3 * 1024 * 1024
 
 DISH_RGB = {
     "chicken_rice": (202, 129, 74),
@@ -68,6 +86,62 @@ GENERATED_DISCLOSURE = (
 
 class GpuPipelineUnreadyError(RuntimeError):
     """Raised when `--mode gpu` is active but GPU fixtures or weights are unavailable."""
+
+
+class GpuRequestUnsupportedError(RuntimeError):
+    """Raised when the built-in sgedit path has no validated task for the request."""
+
+
+_GPU_LOCK = threading.Lock()  # one generation at a time on the single editor
+_EDITOR = None
+
+
+def sgedit_root() -> Path | None:
+    """Directory containing the `sgedit` package: WORKER_SGEDIT_ROOT, else this repository's root."""
+    configured = os.environ.get("WORKER_SGEDIT_ROOT", "").strip()
+    if configured:
+        return Path(configured)
+    parents = Path(__file__).resolve().parents
+    if len(parents) > 3 and (parents[3] / "sgedit").is_dir():
+        return parents[3]
+    return None
+
+
+def load_research() -> SimpleNamespace:
+    """Import the research modules (needs numpy/torch/scipy/PIL and SGEDIT_BASELINE prompts)."""
+    root = sgedit_root()
+    if root is None or not (root / "sgedit").is_dir():
+        raise GpuPipelineUnreadyError(
+            "Cannot locate the sgedit package; set WORKER_SGEDIT_ROOT to the research checkout."
+        )
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    try:
+        import numpy as np
+        from PIL import Image
+        from sgedit import editor, loop
+    except Exception as exc:
+        raise GpuPipelineUnreadyError(
+            f"Cannot import sgedit GPU pipeline dependencies: {type(exc).__name__}: {exc}"
+        ) from exc
+    return SimpleNamespace(np=np, Image=Image, editor=editor, loop=loop, root=root)
+
+
+def get_editor(research: SimpleNamespace):
+    """Load BrushNet-SDXL once per process (slow); call with _GPU_LOCK held or at startup."""
+    global _EDITOR
+    if _EDITOR is None:
+        _EDITOR = research.editor.Editor()
+    return _EDITOR
+
+
+def builtin_fixture_paths(base: Path, dish_id: str) -> tuple[Path, Path]:
+    source = BUILTIN_SOURCES[dish_id]
+    return base / dish_id / "input.png", base / dish_id / f"mask_{source}.png"
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def is_allowed_bind_ip(addr: str) -> bool:
@@ -117,7 +191,10 @@ def make_solid_png_data_url(rgb: tuple[int, int, int], width: int = 96, height: 
 
 
 def is_gpu_pipeline_ready() -> bool:
-    """Return True if either WORKER_GPU_CMD or WORKER_FIXTURE_DIR is configured and present."""
+    """Return True if WORKER_GPU_CMD is set or every built-in dish fixture is present.
+
+    This is a configuration check only; it does not prove the models load or run.
+    """
     gpu_cmd = os.environ.get("WORKER_GPU_CMD", "").strip()
     if gpu_cmd:
         return True
@@ -125,7 +202,9 @@ def is_gpu_pipeline_ready() -> bool:
     if not fixture_dir:
         return False
     base = Path(fixture_dir)
-    return base.is_dir() and all((base / d / "input.png").is_file() for d in ALLOWED_DISHES)
+    return base.is_dir() and all(
+        path.is_file() for dish in BUILTIN_SOURCES for path in builtin_fixture_paths(base, dish)
+    )
 
 
 def build_dry_run_artifact(
@@ -200,81 +279,160 @@ def run_gpu_pipeline(
             "generated_label": str(result.get("generated_label", GENERATED_DISCLOSURE)),
         }
 
+    return run_builtin_pipeline(dish_id, change_ids)
+
+
+def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, object]:
+    """Check-and-retry with the research contracts; returns the selected candidate.
+
+    Mirrors the retry arm of `sgedit.loop.Runner.run` (generate, check, stop at the
+    first pass, otherwise `next_spec`, at most K generations, select by score) without
+    generating the K same-settings seed candidates that only the comparison arms need.
+    """
+    if len(change_ids) != 1 or change_ids[0] not in BUILTIN_TASKS or dish_id not in BUILTIN_SOURCES:
+        raise GpuRequestUnsupportedError(
+            "The validated-model path supports exactly one of "
+            f"{sorted(BUILTIN_TASKS)} on {sorted(BUILTIN_SOURCES)}."
+        )
+    task, source = BUILTIN_TASKS[change_ids[0]], BUILTIN_SOURCES[dish_id]
+
     fixture_dir = os.environ.get("WORKER_FIXTURE_DIR", "").strip()
     if not fixture_dir:
         raise GpuPipelineUnreadyError(
             "GPU mode requires WORKER_FIXTURE_DIR (pointing to dish input/mask PNGs) or WORKER_GPU_CMD. "
             "Refusing to return a synthetic dry-run fixture while in '--mode gpu'."
         )
+    input_path, mask_path = builtin_fixture_paths(Path(fixture_dir), dish_id)
+    for path in (input_path, mask_path):
+        if not path.is_file():
+            raise GpuPipelineUnreadyError(f"Missing dish fixture: {path}")
 
-    dish_dir = Path(fixture_dir) / dish_id
-    input_path = dish_dir / "input.png"
-    if not input_path.is_file():
-        raise GpuPipelineUnreadyError(f"Missing dish base fixture: {input_path}")
+    research = load_research()
+    np, Image, loop = research.np, research.Image, research.loop
+    try:
+        max_attempts = max(1, min(8, int(os.environ.get("WORKER_MAX_ATTEMPTS", "4"))))
+        max_side = max(64, min(FIXTURE_SIDE, int(os.environ.get("WORKER_OUTPUT_MAX_SIDE", "768"))))
+    except ValueError as exc:
+        raise GpuPipelineUnreadyError(f"Invalid worker integer setting: {exc}") from exc
+    checker_url = os.environ.get("WORKER_CHECKER_URL", "").strip() or DEFAULT_CHECKER_URL
+    run_root = os.environ.get("WORKER_RUN_DIR", "").strip()
 
     try:
-        from PIL import Image
-        from sgedit.editor import BrushNetEditor, EditSpec
-        from sgedit.loop import POLICY, CheckerClient, base_spec, next_spec
-        from sgedit.prompts import ladder
-    except Exception as exc:
-        raise GpuPipelineUnreadyError(
-            f"Cannot import sgedit GPU pipeline dependencies: {exc}"
-        ) from exc
+        image = Image.open(input_path).convert("RGB")
+        mask = np.asarray(Image.open(mask_path).convert("L")) > 127
+        expected = (FIXTURE_SIDE, FIXTURE_SIDE)
+        if image.size != expected or mask.shape != expected:
+            raise GpuPipelineUnreadyError(
+                f"Fixtures must be {FIXTURE_SIDE}x{FIXTURE_SIDE}: {input_path.name} is {image.size}, "
+                f"{mask_path.name} is {mask.shape[::-1]}."
+            )
+        if not mask.any():
+            raise GpuPipelineUnreadyError(f"Mask has no editable pixels: {mask_path}")
 
-    try:
-        editor = BrushNetEditor()
-        checker_url = os.environ.get("WORKER_CHECKER_URL", "http://127.0.0.1:8000/v1")
-        checker = CheckerClient(base_url=checker_url)
-        current_img = Image.open(input_path).convert("RGB")
-        total_attempts = 0
-        all_passed = True
+        with _GPU_LOCK, tempfile.TemporaryDirectory(prefix="meal-worker-") as tmp:
+            if run_root:  # keep every attempt and a run record; otherwise nothing is retained
+                out_dir = Path(run_root) / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.urandom(3).hex()}"
+                out_dir.mkdir(parents=True)
+            else:
+                out_dir = Path(tmp)
+            runner = loop.Runner(
+                get_editor(research), loop.CheckerClient(url=checker_url), out_dir, prompt_set=PROMPT_SET
+            )
+            job = {
+                "key": loop.job_key(dish_id, task),
+                "image": image,
+                "mask": mask,
+                "original_path": str(input_path.resolve()),
+                "task": task,
+                "source": source,
+            }
+            seeds = loop.POLICY["seeds"]
+            spec = loop.base_spec(task, source, seeds[0], PROMPT_SET)
+            specs, tried = [spec], [runner.candidate(job, spec, "retry0")]
+            while not tried[-1]["pass"] and len(tried) < max_attempts:
+                spec = loop.next_spec(
+                    spec, task, source, tried[-1]["failure"], len(tried), seeds, PROMPT_SET
+                )
+                specs.append(spec)
+                tried.append(runner.candidate(job, spec, f"retry{len(tried)}"))
 
-        for cid in change_ids:
-            mask_path = dish_dir / f"mask_{cid}.png"
-            if not mask_path.is_file():
-                raise GpuPipelineUnreadyError(f"Missing change mask fixture: {mask_path}")
-            mask_img = Image.open(mask_path).convert("L")
-            task, target, source = CHANGE_TO_TASK[cid]
-            prompts = ladder(task, target, source)
-            row = {"task": task, "target": target, "source": source}
-            spec: EditSpec = base_spec(task, prompts, seed)
-            policy = POLICY[task]
-            passed = False
+            # Same rule as sgedit.results.summarize_result: best score, first wins ties.
+            pick = max(range(len(tried)), key=lambda i: tried[i]["score"])
+            selected, sel_spec = tried[pick], specs[pick]
+            steps = loop.ladder(task, source, PROMPT_SET)
+            rung = next(
+                (i for i, (p, n) in enumerate(steps) if (p, n) == (sel_spec.prompt, sel_spec.negative_prompt)),
+                0,
+            )
+            policy_version = loop.POLICY["version"]
+            prompt_id = f"sgedit-{policy_version}:{PROMPT_SET}:{task}/{source}:ladder{rung}:g{sel_spec.guidance:g}"
+            checker_model = str(selected["check"].get("model", "qwen2.5-vl checker"))
 
-            for k in range(1, 5):
-                total_attempts = min(8, total_attempts + 1)
-                candidate = editor.edit(current_img, mask_img, spec)
-                res = checker.Check(candidate, mask_img, row, k)
-                if res.accept:
-                    current_img = candidate
-                    passed = True
-                    break
-                nxt = next_spec(spec, res.failure_mode, prompts, policy)
-                if nxt is None:
-                    current_img = candidate
-                    break
-                spec = nxt
+            if run_root:
+                record = {
+                    "dish_id": dish_id,
+                    "change_id": change_ids[0],
+                    "task": task,
+                    "source": source,
+                    "input": {"path": str(input_path), "sha256": _sha256_file(input_path)},
+                    "mask": {"path": str(mask_path), "sha256": _sha256_file(mask_path)},
+                    "sgedit_root": str(research.root),
+                    "policy_version": policy_version,
+                    "prompt_set": PROMPT_SET,
+                    "max_attempts": max_attempts,
+                    "checker_url": checker_url,
+                    "checker_model": checker_model,
+                    "attempts": [
+                        {
+                            "tag": c["tag"],
+                            "seed": sp.seed,
+                            "guidance": sp.guidance,
+                            "prompt": sp.prompt,
+                            "negative_prompt": sp.negative_prompt,
+                            "sha256": c["sha256"],
+                            "score": c["score"],
+                            "pass": c["pass"],
+                            "failure": c["failure"],
+                        }
+                        for c, sp in zip(tried, specs)
+                    ],
+                    "selected": selected["tag"],
+                    "selected_passed_checker": bool(selected["pass"]),
+                    "note": "Checker verdicts select candidates; they are not an evaluation result.",
+                }
+                (out_dir / "run.json").write_text(json.dumps(record, indent=1))
 
-            all_passed = all_passed and passed
+            preview = Image.open(selected["path"]).convert("RGB")
+            if max(preview.size) > max_side:
+                preview.thumbnail((max_side, max_side), Image.LANCZOS)
+            buf = io.BytesIO()
+            preview.save(buf, format="PNG", optimize=True)
 
-        buf = io.BytesIO()
-        current_img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        image_data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        if len(image_data_url) > MAX_IMAGE_DATA_URL_BYTES:
+            raise GpuPipelineUnreadyError(
+                "Preview PNG exceeds the gateway response limit; lower WORKER_OUTPUT_MAX_SIDE."
+            )
+        sys.stderr.write(
+            f"[gpu-worker] {dish_id}/{task}: attempts={len(tried)} selected={selected['tag']} "
+            f"checker_passed={bool(selected['pass'])}\n"
+        )
         return {
             "provider": "tailscale-gpu-worker",
-            "model": "brushnet-sdxl+qwen2.5-vl-7b-4bit",
+            "model": f"brushnet-sdxl+{checker_model}",
             "prompt_id": prompt_id,
-            "seed": seed,
-            "attempts": max(1, min(8, total_attempts)),
-            "checker_passed": all_passed,
-            "image_data_url": f"data:image/png;base64,{b64}",
+            "seed": int(sel_spec.seed),
+            "attempts": len(tried),
+            "checker_passed": bool(selected["pass"]),
+            "image_data_url": image_data_url,
             "generated_label": GENERATED_DISCLOSURE,
         }
     except GpuPipelineUnreadyError:
         raise
     except Exception as exc:
-        raise GpuPipelineUnreadyError(f"sgedit GPU execution failed: {exc}") from exc
+        raise GpuPipelineUnreadyError(
+            f"sgedit GPU execution failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 class WorkerHandler(BaseHTTPRequestHandler):
@@ -374,6 +532,12 @@ class WorkerHandler(BaseHTTPRequestHandler):
                 prompt_id=prompt_id,
                 seed=seed,
             )
+        except GpuRequestUnsupportedError as exc:
+            self._send_json(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                {"error": "unsupported_by_validated_model", "message": str(exc)},
+            )
+            return
         except GpuPipelineUnreadyError as exc:
             self._send_json(
                 HTTPStatus.SERVICE_UNAVAILABLE,
@@ -403,6 +567,11 @@ def main() -> None:
         default=os.environ.get("WORKER_MODE", "dry-run"),
         help="Execution mode (default: dry-run).",
     )
+    parser.add_argument(
+        "--warm",
+        action="store_true",
+        help="In gpu mode, load the sgedit editor before listening (exits if it cannot load).",
+    )
     args = parser.parse_args()
 
     bind_addr = args.bind.strip() or detect_tailscale_ipv4()
@@ -415,6 +584,13 @@ def main() -> None:
         raise SystemExit(
             "MODEL_WORKER_TOKEN is required when binding the GPU worker to a Tailscale interface."
         )
+
+    if args.warm and args.mode == "gpu" and not os.environ.get("WORKER_GPU_CMD", "").strip():
+        try:
+            get_editor(load_research())
+        except Exception as exc:
+            raise SystemExit(f"--warm could not load the sgedit editor: {type(exc).__name__}: {exc}")
+        print("sgedit editor loaded", flush=True)
 
     WorkerHandler.expected_token = token
     WorkerHandler.mode = args.mode
