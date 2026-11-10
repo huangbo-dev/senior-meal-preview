@@ -1,3 +1,24 @@
+# Standalone-repository rules (previously inherited from the coursework repository).
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# Meal photographs, fixtures, generated images and run records never enter Git.
+*.png
+*.jpg
+*.jpeg
+*.webp
+/fixtures/
+/runs/
+# Model weights and credentials.
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.key
+*.pem
+
 .DS_Store
 *.log
 .env

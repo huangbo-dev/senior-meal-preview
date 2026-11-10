@@ -10,9 +10,8 @@
 
 ## 2. Working Context & Non-Negotiable Boundaries
 
-- **Branch**: `app/senior-meal-preview` in `/Users/huangbo/Programming/NTU/CE7454/ce7454-senior-meal-preview-worktree`.
-- **App directory**: `extensions/senior-meal-preview/`.
-- **Coursework isolation**: Never modify files outside `extensions/senior-meal-preview/` (`sgedit/`, `evaluate/`, `study/`, `report/`, `plan/`, `calib/`, `bench/`) or merge this extension into `main`.
+- **Repository**: this standalone app repository (split with history from the repository root on the coursework repo's `app/senior-meal-preview` branch on 2026-11-10). Branches: `main` (integration) and `production` (what is deployed).
+- **Coursework isolation**: The CE7454 coursework repository is separate. Never modify it from here (`sgedit/`, `evaluate/`, `study/`, `report/`, `plan/`, `calib/`, `bench/`) and never merge this app into its `main`. The GPU worker only reads `sgedit` through `WORKER_SGEDIT_ROOT`.
 - **Truthful evidence boundary**: Symbolic drawings must always be labelled as simulated (`"Simulated plate illustration"`), and GPU-assisted previews must carry their `GpuArtifact` provenance (`model`, `prompt_id`, `attempts`, `checker_passed` as a selector diagnostic only, and `generated_label` stating it is not a real meal or clinical verification). Never silently substitute a mock image when the GPU worker is offline or times out.
 
 ## 3. Current Implemented State (9 November 2026)
@@ -45,7 +44,7 @@
 
 ## 4. Verification Commands (Run First on Pickup)
 
-From `extensions/senior-meal-preview/`:
+From the repository root:
 
 ```sh
 ./deploy/predeploy-check.sh

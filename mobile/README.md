@@ -6,7 +6,7 @@ Accessible meal-change preview client for Android, iOS, and Web, isolated from t
 
 For fresh-clone instructions and verified native build status, read [the mobile build guide](../docs/MOBILE_BUILD.md).
 
-Start the Rust API from `extensions/senior-meal-preview/` with `cargo run --locked --manifest-path backend/Cargo.toml`, then from this `mobile/` directory:
+Start the Rust API from the repository root with `cargo run --locked --manifest-path backend/Cargo.toml`, then from this `mobile/` directory:
 
 ```sh
 flutter pub get

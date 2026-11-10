@@ -89,7 +89,11 @@ _EDITOR = None
 
 
 def sgedit_root() -> Path | None:
-    """Directory containing the `sgedit` package: WORKER_SGEDIT_ROOT, else this repository's root."""
+    """Directory containing the `sgedit` package: WORKER_SGEDIT_ROOT.
+
+    Falls back to three levels up for the old layout where this app sat inside the coursework
+    repository at `extensions/senior-meal-preview/`.
+    """
     configured = os.environ.get("WORKER_SGEDIT_ROOT", "").strip()
     if configured:
         return Path(configured)
@@ -104,7 +108,7 @@ def load_research() -> SimpleNamespace:
     root = sgedit_root()
     if root is None or not (root / "sgedit").is_dir():
         raise GpuPipelineUnreadyError(
-            "Cannot locate the sgedit package; set WORKER_SGEDIT_ROOT to the research checkout."
+            "Cannot locate the sgedit package; set WORKER_SGEDIT_ROOT to the coursework checkout."
         )
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))

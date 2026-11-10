@@ -36,7 +36,7 @@ This guide explains how to deploy the **Senior Meal Preview** Rust API gateway o
 
 ## 2. Pre-Flight Gate (Run Before Touching Production Hosts)
 
-From `extensions/senior-meal-preview/`:
+From the repository root:
 
 ```sh
 ./deploy/predeploy-check.sh
@@ -63,7 +63,7 @@ This script verifies all deployment manifests, runs Rust formatting/Clippy/19 in
 
 ### Step B: Start the Private GPU Worker
 
-On the GPU machine, from `extensions/senior-meal-preview/`:
+On the GPU machine, from the repository root:
 
 ```sh
 ./deploy/deploy-gpu-worker.sh
@@ -83,7 +83,7 @@ The worker binds strictly to the GPU server's `100.x.y.z` Tailscale IP (or `127.
 
 #### Option 1: Bare-metal `systemd` + Caddy (recommended on a small t4g/t3 EC2 instance)
 
-From `extensions/senior-meal-preview/` on the EC2 instance:
+From the repository root on the EC2 instance:
 
 ```sh
 ./deploy/deploy-ec2.sh
@@ -111,7 +111,7 @@ DOMAIN=mealpreview.example.com docker compose -f deploy/docker-compose.ec2.yml u
 
 ### Step D: Build Flutter Mobile / Web Clients for EC2
 
-From `extensions/senior-meal-preview/mobile/`:
+From `mobile/`:
 
 ```sh
 # Web bundle served by Caddy on EC2

@@ -1,6 +1,6 @@
 # A little change: UI design specification
 
-**Scope:** `extensions/senior-meal-preview/` only. Separate, non-submission Flutter + Rust app.
+**Scope:** this app repository only. Separate, non-submission Flutter + Rust app.
 **Design baseline:** commit `023aac0ceab7d64fd795345277fec93d086b8dc7`, P0/P1 pass implemented 8 November 2026.
 **Status:** P0 and P1 implemented in Flutter (`mobile/lib/theme.dart`, `mobile/lib/widgets.dart`, `mobile/lib/main.dart`) and Rust (`backend/src/lib.rs`). Native assistive-technology and older-adult usability work (P2) remain future work.
 

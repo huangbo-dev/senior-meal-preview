@@ -1,6 +1,13 @@
 # Senior Meal Preview
 
-**A separate, non-submission app extension.** This is a working Rust API and Flutter client for rehearsing preference-led meal changes. It does not modify any CE7454 coursework files (`sgedit/`, `evaluate/`, `study/`, `report/`, `plan/`, `calib/`, `bench/`).
+**A separate, non-submission app.** This is a working Rust API and Flutter client for rehearsing preference-led meal changes. It lives in its own repository and does not modify any CE7454 coursework files (`sgedit/`, `evaluate/`, `study/`, `report/`, `plan/`, `calib/`, `bench/`); the optional GPU worker only reads the coursework `sgedit` package from the checkout named by `WORKER_SGEDIT_ROOT`.
+
+## Branches
+
+- `main`: integration branch; all work lands here.
+- `production`: what is deployed. Move it forward only by fast-forward from `main` (`git switch production && git merge --ff-only main`) after `./deploy/predeploy-check.sh` passes on the commit being promoted.
+
+No other long-lived branches. Nothing is pushed or deployed automatically.
 
 By default, previews are deterministic symbolic plate drawings (`render_mode: "illustrative_only"`). When deployed on an **AWS EC2 instance** connected over a private **Tailscale** mesh network (`tailscale0`) to a GPU machine running `gpu-worker/gpu_worker.py`, the app also supports an optional `gpu_assisted` preview mode with full model/prompt/attempt provenance (`GpuArtifact`) and strict fail-closed error handling.
 
@@ -23,7 +30,7 @@ This is an investigator/developer prototype, not a participant study, nutrition 
 
 ## Quick verification & pre-deployment gate
 
-From `extensions/senior-meal-preview/`:
+From the repository root:
 
 ```sh
 ./deploy/predeploy-check.sh

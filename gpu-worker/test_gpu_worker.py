@@ -264,7 +264,7 @@ class FakeEditor:
         return Image.fromarray(arr), {**asdict(spec), "crop_box": None, "seconds": 0.0}
 
 
-@unittest.skipUnless(_research_deps_available(), "needs numpy, scipy, torch, PIL and the repo's sgedit package")
+@unittest.skipUnless(_research_deps_available(), "needs numpy, scipy, torch, PIL, and WORKER_SGEDIT_ROOT pointing at the coursework checkout")
 class BuiltinSgeditAdapterTests(unittest.TestCase):
     """Runs the worker's built-in path through the real sgedit.loop code with a fake editor and checker."""
 

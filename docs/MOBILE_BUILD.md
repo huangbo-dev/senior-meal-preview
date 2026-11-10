@@ -1,6 +1,6 @@
 # Build the meal-preview app on another machine
 
-This is the independent **non-submission** app extension on `app/senior-meal-preview`, not the CE7454 research pipeline. Keep work on this branch or an app-specific branch. Do not move it onto `main` or into the coursework bundle.
+This is the independent **non-submission** app, kept in its own repository, not the CE7454 research pipeline. Work on `main`; `production` is what is deployed. Do not move the app into the coursework repository's `main` or into the coursework bundle.
 
 ## Verified status
 
@@ -27,12 +27,11 @@ The separate research code remains Python/PyTorch with BrushNet-SDXL and a Qwen 
 
 ## 1. Get the correct source
 
-The GitHub repository is private. Authenticate with an account that already has access; never put tokens into these commands or commit credentials.
+The repository is private (no remote is configured yet on the machine where it was created). Authenticate with an account that already has access; never put tokens into these commands or commit credentials.
 
 ```sh
-git clone --branch app/senior-meal-preview --single-branch \
-  https://github.com/huangbo-dev/ce7454-sgfood-edit.git
-cd ce7454-sgfood-edit/extensions/senior-meal-preview
+git clone --branch main <this repository's URL> senior-meal-preview
+cd senior-meal-preview
 git status --short --branch
 ```
 
@@ -51,7 +50,7 @@ Inspect any SDK license prompts yourself. The checked Mac reports some unaccepte
 
 ## 2. Start the backend
 
-Terminal A, from `extensions/senior-meal-preview/`:
+Terminal A, from the repository root:
 
 ```sh
 cargo run --locked --manifest-path backend/Cargo.toml
@@ -61,7 +60,7 @@ The API listens at `http://127.0.0.1:8787`. It intentionally cannot bind to a LA
 
 ## 3. Android debug build and emulator
 
-Terminal B, from `extensions/senior-meal-preview/mobile/`:
+Terminal B, from `mobile/`:
 
 ```sh
 flutter pub get
@@ -107,7 +106,7 @@ Replace `<ios-simulator-id>` with the actual simulator ID. Simulator builds do n
 
 ## 5. Regression checks
 
-From `extensions/senior-meal-preview/`:
+From the repository root:
 
 ```sh
 ./scripts/check.sh

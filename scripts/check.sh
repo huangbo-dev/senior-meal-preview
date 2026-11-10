@@ -5,6 +5,9 @@ cd "$ROOT"
 cargo fmt --manifest-path backend/Cargo.toml --check
 cargo test --manifest-path backend/Cargo.toml --locked
 cargo clippy --manifest-path backend/Cargo.toml --all-targets --locked -- -D warnings
+if [[ -z "${WORKER_SGEDIT_ROOT:-}" ]]; then
+  echo "NOTE: WORKER_SGEDIT_ROOT is not set; the sgedit adapter contract tests will be skipped." >&2
+fi
 python3 -m unittest discover -s gpu-worker -p "test_*.py"
 cd mobile
 flutter pub get
