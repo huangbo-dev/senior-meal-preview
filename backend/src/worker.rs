@@ -114,6 +114,10 @@ pub struct GpuArtifact {
 pub enum WorkerFailure {
     Busy,
     Timeout,
+    /// The worker is reachable but has no validated model path for this request (HTTP 422).
+    Unsupported,
+    /// The worker is reachable but its models, fixtures or checker are not ready (HTTP 503).
+    NotReady,
     Unreachable(String),
     InvalidResponse(String),
 }
@@ -337,10 +341,15 @@ async fn send_worker_http(
         .ok_or_else(|| WorkerFailure::InvalidResponse("Missing HTTP status from worker.".into()))?;
 
     let json_slice = &response_bytes[header_end + 4..];
-    if !(200..300).contains(&status_code) {
-        return Err(WorkerFailure::Unreachable(format!(
-            "GPU worker returned HTTP {status_code}."
-        )));
+    match status_code {
+        200..300 => {}
+        422 => return Err(WorkerFailure::Unsupported),
+        503 => return Err(WorkerFailure::NotReady),
+        _ => {
+            return Err(WorkerFailure::Unreachable(format!(
+                "GPU worker returned HTTP {status_code}."
+            )));
+        }
     }
     let artifact: GpuArtifact = serde_json::from_slice(json_slice)
         .map_err(|e| WorkerFailure::InvalidResponse(format!("Invalid worker JSON schema: {e}")))?;

@@ -3,6 +3,7 @@
 from pathlib import Path
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -63,12 +64,55 @@ try:
             time.sleep(0.1)
     else:
         raise RuntimeError("The temporary local API did not start in time.")
-    subprocess.run(
-        ["dart", "run", "tool/smoke_api.dart"],
-        cwd=ROOT / "mobile",
-        env={**os.environ, "API_BASE_URL": base_url},
-        check=True,
-    )
+    # The API being up does not mean the worker is listening yet; a request sent now would be
+    # reported as gpu_unreachable.
+    for _ in range(50):
+        try:
+            with urllib.request.urlopen(worker_url + "/healthz", timeout=1) as response:
+                assert json.load(response)["worker_mode"] == "dry-run"
+            break
+        except urllib.error.URLError:
+            time.sleep(0.1)
+    else:
+        raise RuntimeError("The temporary GPU worker did not start in time.")
+    if shutil.which("dart"):
+        subprocess.run(
+            ["dart", "run", "tool/smoke_api.dart"],
+            cwd=ROOT / "mobile",
+            env={**os.environ, "API_BASE_URL": base_url},
+            check=True,
+        )
+    else:
+        # No Dart SDK on this machine: exercise the same HTTP contract from Python instead.
+        # This does not test the Dart client itself.
+        def post(body: dict) -> tuple[int, dict]:
+            req = urllib.request.Request(
+                base_url + "/api/v1/preview",
+                data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    return response.status, json.load(response)
+            except urllib.error.HTTPError as error:
+                with error:
+                    return error.code, json.load(error)
+
+        with urllib.request.urlopen(base_url + "/api/v1/catalog", timeout=5) as response:
+            catalog = json.load(response)
+        assert catalog["capabilities"] == {"symbolic_preview": True, "gpu_preview": True}, catalog
+        selection = {"dish_id": "chicken_rice", "change_ids": ["brown_rice"]}
+        status, body = post(selection)
+        assert status == 200 and "gpu_artifact" not in body, (status, body)
+        status, body = post({**selection, "render_mode": "gpu_assisted"})
+        assert status == 200, (status, body)
+        artifact = body["gpu_artifact"]
+        assert artifact["provider"] == "tailscale-gpu-dry-run", artifact
+        assert artifact["image_data_url"].startswith("data:image/png;base64,")
+        status, body = post({"dish_id": "fish_soup", "change_ids": ["brown_rice"]})
+        assert (status, body["error"]["code"]) == (400, "incompatible_change"), (status, body)
+        print("Python HTTP smoke passed (dart not installed; Dart client not exercised).")
 finally:
     for proc in (api_process, worker_process):
         proc.terminate()

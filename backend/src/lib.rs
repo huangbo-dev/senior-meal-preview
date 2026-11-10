@@ -454,6 +454,16 @@ async fn preview(
                     "gpu_timeout",
                     "The Tailscale GPU model worker timed out. Check the GPU node or use symbolic illustration.",
                 ),
+                WorkerFailure::Unsupported => ApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "gpu_unsupported_request",
+                    "The AI preview currently handles one change at a time: brown rice or added vegetables on a rice meal. Choose one of those, or use symbolic illustration.",
+                ),
+                WorkerFailure::NotReady => ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "gpu_not_ready",
+                    "The GPU model worker is running but its models or meal photos are not ready. No mock image was substituted. Use symbolic illustration for now.",
+                ),
                 WorkerFailure::Unreachable(_) => ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "gpu_unreachable",

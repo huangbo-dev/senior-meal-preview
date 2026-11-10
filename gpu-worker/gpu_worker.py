@@ -55,14 +55,6 @@ ALLOWED_CHANGES = {"extra_vegetables", "brown_rice", "sauce_on_side"}
 ALLOWED_TEXTURES = {"any", "soft"}
 ALLOWED_FLAVOURS = {"any", "mild"}
 
-PROMPT_MAP = {
-    ("chicken_rice", ("brown_rice",)): "t2_r1_hawker_brown_rice",
-    ("chicken_rice", ("extra_vegetables",)): "t1b_steamed_broccoli_side",
-    ("chicken_rice", ("brown_rice", "extra_vegetables")): "t2_r1_hawker_plus_t1b_broccoli",
-    ("tofu_rice", ("brown_rice",)): "t2_r1_hawker_tofu_brown_rice",
-    ("fish_soup", ("extra_vegetables",)): "t1b_fish_soup_greens",
-}
-
 # Built-in sgedit path: research task per change, and the staple ("source") each dish fixture carries.
 BUILTIN_TASKS = {"brown_rice": "T2", "extra_vegetables": "T1-B"}
 BUILTIN_SOURCES = {"chicken_rice": "rice", "tofu_rice": "rice"}
@@ -231,10 +223,10 @@ def build_dry_run_artifact(
     return {
         "provider": "tailscale-gpu-dry-run",
         "model": "dry_run_fixture",
-        "prompt_id": prompt_id,
+        "prompt_id": f"dry_run:{prompt_id}",
         "seed": seed,
         "attempts": 1,
-        "checker_passed": True,
+        "checker_passed": False,  # no checker runs in dry-run; never claim a pass
         "image_data_url": make_solid_png_data_url((base_r, base_g, base_b)),
         "generated_label": GENERATED_DISCLOSURE,
     }
@@ -537,8 +529,9 @@ class WorkerHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_selection"})
             return
 
-        key = (dish_id, tuple(sorted(change_ids)))
-        prompt_id = PROMPT_MAP.get(key, f"locked_{dish_id}_{'_'.join(sorted(change_ids))}")
+        # Request label only. No prompt is involved in dry-run; the built-in sgedit path replaces it
+        # with the real policy version and prompt-ladder step.
+        prompt_id = f"request:{dish_id}:{'+'.join(sorted(change_ids))}"
         seed_bytes = hashlib.sha256(f"{dish_id}:{','.join(change_ids)}".encode()).digest()[:4]
         seed = int.from_bytes(seed_bytes, "big")
 

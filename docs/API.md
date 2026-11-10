@@ -49,7 +49,8 @@ Error shape:
 - `415`: not `application/json`.
 - `422`: malformed or unsupported JSON shape, fields, or enum values.
 - `502`: Tailscale GPU worker unreachable (`gpu_unreachable`) or returned an invalid artifact (`gpu_invalid_response`).
-- `503`: Tailscale GPU worker not configured (`gpu_unavailable`) or at concurrency limit (`gpu_busy`).
+- `503`: Tailscale GPU worker not configured (`gpu_unavailable`), at concurrency limit (`gpu_busy`), or reachable but without loaded models/fixtures (`gpu_not_ready`).
+- `422` with `gpu_unsupported_request`: the worker has no validated model path for this selection (currently anything other than a single `brown_rice` or `extra_vegetables` change on a rice meal).
 - `504`: Tailscale GPU worker timed out (`gpu_timeout`).
 
 Errors do not echo submitted content. Repeating a valid request returns the same descriptive response and creates no persistent data.

@@ -136,9 +136,11 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
             artifact = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(artifact["provider"], "tailscale-gpu-dry-run")
             self.assertEqual(artifact["model"], "dry_run_fixture")
-            self.assertEqual(artifact["prompt_id"], "t2_r1_hawker_plus_t1b_broccoli")
+            self.assertEqual(
+                artifact["prompt_id"], "dry_run:request:chicken_rice:brown_rice+extra_vegetables"
+            )
             self.assertEqual(artifact["attempts"], 1)
-            self.assertTrue(artifact["checker_passed"])
+            self.assertFalse(artifact["checker_passed"])
             self.assertTrue(artifact["image_data_url"].startswith("data:image/png;base64,"))
             self.assertIn("not a real meal", artifact["generated_label"].lower())
 

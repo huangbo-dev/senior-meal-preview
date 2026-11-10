@@ -61,3 +61,9 @@ On hb-mac, branch `app/senior-meal-preview`, ran `./deploy/predeploy-check.sh` a
 `git diff --check`, shell syntax checks and ignored-secret-path checks passed. Compose configuration parsed with the checked-in example env file substituted in memory and DOMAIN set; missing DOMAIN correctly fails interpolation. Actual host configuration remains absent by design. Caddy runtime/TLS, production networking and physical-device/browser walkthroughs were not tested in this pass. Web build emitted a non-fatal Cupertino font-family warning; build succeeded.
 
 No deployment, DNS change, domain registration, credentials generation, commit or push performed. See `HOSTING_READINESS.md` for open launch decisions.
+
+## Spark02 backend check (2026-11-10)
+
+On Spark02 (aarch64, Rust 1.99 installed under `~/.cargo`, no Flutter/Dart): `cargo fmt --check`, 20 Rust integration tests, Clippy with `-D warnings`, and 18 Python worker tests passed. `python3 scripts/smoke.py` passed using its Python HTTP fallback, which runs when `dart` is not installed and does not exercise the Dart client. Flutter analysis, Flutter tests and the web build were not run here. The worker used dry-run fixtures or fake test doubles; no real inference was run.
+
+For manual testing, `scripts/dev-server.sh start [dry-run|gpu]` runs the worker and the API on loopback (API `127.0.0.1:8787`, worker `127.0.0.1:8791`) and `scripts/dev-server.sh stop` ends them. In dry-run the "GPU" image is a solid-colour placeholder reported with `checker_passed: false`. In `gpu` mode without weights and fixtures the API answers `503 gpu_not_ready`.

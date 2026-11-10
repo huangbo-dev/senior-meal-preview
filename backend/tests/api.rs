@@ -527,6 +527,84 @@ async fn gpu_assisted_mode_bridges_to_authenticated_worker_and_validates_artifac
 }
 
 #[tokio::test]
+async fn worker_refusals_are_reported_truthfully_not_as_outages() {
+    use senior_meal_preview::{RuntimeConfig, worker::GpuWorkerConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    for (worker_status, api_status, code) in [
+        (
+            "422 Unprocessable Entity",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "gpu_unsupported_request",
+        ),
+        (
+            "503 Service Unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "gpu_not_ready",
+        ),
+        (
+            "500 Internal Server Error",
+            StatusCode::BAD_GATEWAY,
+            "gpu_unreachable",
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server_task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 512];
+            while !buf.ends_with(b"}") {
+                let n = socket.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            let body = r#"{"error":"worker_refused","message":"internal detail"}"#;
+            let response = format!(
+                "HTTP/1.1 {worker_status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let worker_cfg = GpuWorkerConfig::new(
+            &format!("http://127.0.0.1:{port}"),
+            None,
+            std::time::Duration::from_secs(5),
+            1,
+        )
+        .unwrap();
+        let app = senior_meal_preview::app_with_config(RuntimeConfig {
+            gpu_worker: Some(worker_cfg),
+            ..RuntimeConfig::default()
+        });
+        let mut body = request();
+        body["render_mode"] = json!("gpu_assisted");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/preview")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), api_status);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], code);
+        assert!(value.get("gpu_artifact").is_none());
+        // Worker-internal detail is never forwarded to clients.
+        assert!(!value.to_string().contains("internal detail"));
+        server_task.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn ec2_api_token_and_configured_origins_are_enforced() {
     use senior_meal_preview::RuntimeConfig;
 
