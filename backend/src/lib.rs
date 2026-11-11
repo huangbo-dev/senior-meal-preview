@@ -25,7 +25,7 @@ use tower_http::{
 use worker::{GpuArtifact, GpuWorkerConfig, WorkerFailure, WorkerGenerateRequest, WorkerTransport};
 
 pub const MODE: &str = "illustrative_only";
-pub const NOTICE: &str = "Prototype only. Illustrations are not model results or nutrition advice.";
+pub const NOTICE: &str = "Not nutrition, allergen or medical advice.";
 /// Fewest and most serving changes a single preview request may contain.
 pub const MIN_CHANGES: usize = 1;
 pub const MAX_CHANGES: usize = 2;
@@ -163,7 +163,7 @@ pub struct Catalog {
     notice: &'static str,
 }
 
-/// The hand-authored demo catalog, built once and shared by every request.
+/// The hand-authored catalog, built once and shared by every request.
 pub static CATALOG: LazyLock<Catalog> = LazyLock::new(build_catalog);
 
 pub fn catalog() -> &'static Catalog {
@@ -204,19 +204,19 @@ fn build_catalog() -> Catalog {
             Change {
                 id: "extra_vegetables",
                 label: "Add vegetables",
-                description: "An illustrative extra vegetable side",
+                description: "Extra vegetables on the side",
                 dish_ids: vec!["chicken_rice", "fish_soup", "tofu_rice"],
             },
             Change {
                 id: "brown_rice",
                 label: "Try brown rice",
-                description: "An illustrative rice swap",
+                description: "Brown rice instead of white rice",
                 dish_ids: vec!["chicken_rice", "tofu_rice"],
             },
             Change {
                 id: "sauce_on_side",
                 label: "Sauce on the side",
-                description: "An illustrative serving change",
+                description: "Sauce served separately",
                 dish_ids: vec!["chicken_rice", "tofu_rice"],
             },
         ],
@@ -372,19 +372,13 @@ pub fn make_preview(request: PreviewRequest) -> Result<Preview, ApiError> {
         });
     }
     let names: Vec<_> = targets.iter().map(|target| target.label).collect();
-    let summary = format!(
-        "Illustrative request for {}: {}.",
-        dish.name,
-        names.join(" and ")
-    );
+    let summary = format!("{}: {}.", dish.name, names.join(" and "));
     let mut notices = vec![
         NOTICE,
-        "No photo is uploaded and no AI model is called. Your choices are not saved by this API.",
-        "A picture cannot establish ingredients, portion quantities, allergens, nutritional value or health benefit.",
-        "Preferences describe what you would like; this prototype does not validate or change a real recipe.",
+        "No picture was generated. Your choices are not saved.",
     ];
     if request.preferences.texture == Texture::Soft {
-        notices.push("A soft-texture preference does not establish chewing or swallowing safety. Follow your clinician's advice for any prescribed diet.");
+        notices.push("Soft is a preference, not a check of swallowing safety. Follow your clinician's advice.");
     }
     Ok(Preview {
         schema_version: 1,
@@ -476,10 +470,11 @@ async fn preview(
                 ),
             })?;
         // Replace the no-AI-model notice with the truthful GPU-worker provenance notice.
-        result.notices[1] = "Generated via the private Tailscale GPU worker from predefined meal IDs. No personal photo was uploaded and no record is stored.";
-        result.notices.push(
-            "Checker pass status is an automated selection diagnostic, not human or clinical verification.",
-        );
+        result.notices[1] =
+            "AI-generated from a stock meal photo, not a real meal. Your choices are not saved.";
+        result
+            .notices
+            .push("The automated check is not human or clinical verification.");
         result.gpu_artifact = Some(artifact);
     }
 

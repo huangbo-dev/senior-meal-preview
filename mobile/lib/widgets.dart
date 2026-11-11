@@ -287,7 +287,7 @@ class MealArtwork extends StatelessWidget {
 }
 
 /// Compact photo collection, with a dark scrim that guarantees title contrast.
-/// All three demo meals fit on an ordinary phone; large text uses natural height.
+/// All three meals fit on an ordinary phone; large text uses natural height.
 class MealCard extends StatelessWidget {
   const MealCard({
     super.key,
@@ -346,7 +346,7 @@ class MealCard extends StatelessWidget {
       key: Key('meal-semantics-${dish.id}'),
       button: true,
       onTap: onSelect,
-      label: '${dish.name}. $subtitle. Reference photo. Open demo meal.',
+      label: '${dish.name}. $subtitle. Reference photo. Open meal.',
       child: ExcludeSemantics(
         child: CupertinoButton(
           key: Key('dish-${dish.id}'),

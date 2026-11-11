@@ -285,7 +285,7 @@ void main() {
   });
 
   testWidgets(
-    'submission shows honest demo summary, edit retains and reset clears',
+    'submission shows honest request summary, edit retains and reset clears',
     (tester) async {
       final api = FakeApi();
       await tester.pumpWidget(MealPreviewApp(api: api));
@@ -300,7 +300,10 @@ void main() {
       expect(api.sentChanges, ['extra_vegetables']);
       expect(api.sentPreferences!.texture, 'soft');
       expect(api.sentPreferences!.flavour, 'mild');
-      expect(find.text('Demo summary · No model was run'), findsOneWidget);
+      expect(
+        find.text('Request summary · No picture generated'),
+        findsOneWidget,
+      );
       expect(find.text('Reference photo · Unchanged'), findsOneWidget);
       expect(find.text('Requested changes'), findsOneWidget);
       expect(find.text('Soft texture requested'), findsOneWidget);
@@ -570,7 +573,7 @@ void main() {
   );
 
   testWidgets(
-    'demo result labels unchanged reference and requests without synthetic plate output',
+    'summary result labels unchanged reference and requests without synthetic plate output',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;

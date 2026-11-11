@@ -137,20 +137,18 @@ class HttpMealApi implements MealApi {
     } on ApiException {
       rethrow;
     } on TimeoutException {
-      throw const ApiException(
-        'The service took too long. Check that it is running, then try again.',
-      );
+      throw const ApiException('This is taking too long. Please try again.');
     } on http.ClientException {
       throw const ApiException(
-        'Cannot reach the service. Check your connection and the API address, then try again.',
+        'Cannot connect. Check your internet connection, then try again.',
       );
     } on FormatException {
       throw const ApiException(
-        'The service returned an unreadable response. Check that the API versions match.',
+        'Something went wrong. Please update the app or try again later.',
       );
     } on TypeError {
       throw const ApiException(
-        'The service returned an unexpected response. Check that the API versions match.',
+        'Something went wrong. Please update the app or try again later.',
       );
     }
   }
@@ -170,8 +168,8 @@ class HttpMealApi implements MealApi {
       // Fall through to a status-based message.
     }
     return response.statusCode == 408
-        ? 'The service took too long. Check that it is running, then try again.'
-        : 'The service could not complete this request. Please try again.';
+        ? 'This is taking too long. Please try again.'
+        : 'That did not work. Please try again.';
   }
 
   @override

@@ -89,7 +89,7 @@ class _MealFlowState extends State<MealFlow> {
 
   String _friendlyError(Object error) => error is ApiException
       ? error.message
-      : 'Something went wrong with the local service. Please try again.';
+      : 'Something went wrong. Please try again.';
 
   void _goTo(int step) {
     ++_requestVersion;
@@ -220,7 +220,7 @@ class _MealFlowState extends State<MealFlow> {
                                 TextButton(
                                   onPressed: _showPhotoCredits,
                                   key: const Key('photo-credits'),
-                                  child: const Text('About this demo'),
+                                  child: const Text('About'),
                                 ),
                               SizedBox(
                                 height: MediaQuery.paddingOf(context).bottom,
@@ -366,10 +366,10 @@ class _MealFlowState extends State<MealFlow> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SectionHeading('About this demo'),
+              const SectionHeading('About'),
               const SizedBox(height: 10),
               const Text(
-                'Reference photos are not edited in demo mode. A demo summary records requests, not results. Model outputs are labeled separately when available. This extension is not for coursework submission.',
+                'Meal photos are reference photos, not your meal. Not nutrition, allergen or medical advice.',
               ),
               const SizedBox(height: 16),
               Expanded(
@@ -419,9 +419,7 @@ class _MealFlowState extends State<MealFlow> {
         label: 'Try again',
       ),
       const SizedBox(height: 12),
-      const Text(
-        'Meal choices come from the local Rust service. There is no offline fallback.',
-      ),
+      const Text('Check your internet connection, then try again.'),
     ],
   );
 
@@ -435,7 +433,7 @@ class _MealFlowState extends State<MealFlow> {
     ),
     const SizedBox(height: 8),
     Text(
-      '${_catalog!.dishes.length} sample meals · Reference photos',
+      '${_catalog!.dishes.length} meals · Reference photos',
       key: const Key('demo-callout'),
       style: Theme.of(context).textTheme.bodyMedium,
     ),
@@ -565,13 +563,13 @@ class _MealFlowState extends State<MealFlow> {
           ],
         ),
       ),
-      const SizedBox(height: 16),
-      Text(
-        _renderMode == 'gpu_assisted'
-            ? 'AI preview · Results are not clinically verified.'
-            : 'Demo mode · Review your request without generating a photo.',
-        style: Theme.of(context).textTheme.bodyMedium,
-      ),
+      if (_renderMode == 'gpu_assisted') ...[
+        const SizedBox(height: 16),
+        Text(
+          'AI preview · Not clinically verified.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      ],
       const SizedBox(height: 20),
       if (_error != null) ...[
         NoticeCard(_error!, key: const Key('submit-error'), error: true),
@@ -586,7 +584,7 @@ class _MealFlowState extends State<MealFlow> {
       if (_preferences.flavour != 'any') 'Mild flavour',
     ];
     if (_catalog!.capabilities.gpuPreview) {
-      values.add(_renderMode == 'gpu_assisted' ? 'AI preview' : 'Demo');
+      values.add(_renderMode == 'gpu_assisted' ? 'AI preview' : 'Summary only');
     }
     return values.isEmpty ? 'Optional · No preference' : values.join(' · ');
   }
@@ -762,11 +760,11 @@ class _MealFlowState extends State<MealFlow> {
           PreferenceGroup(
             title: 'Preview mode',
             helper:
-                'GPU mode routes only meal IDs over Tailscale to the model worker; errors never fall back to fake photos.',
+                'AI preview makes a picture from a stock meal photo. If it fails, no picture is shown.',
             enabled: !_submitting,
             options: [
               PreferenceOption(
-                label: 'Demo summary',
+                label: 'Summary only',
                 key: 'render-illustrative',
                 selected: renderMode == 'illustrative_only',
                 onSelect: () => onMode('illustrative_only'),
@@ -797,7 +795,7 @@ class _MealFlowState extends State<MealFlow> {
       const SizedBox(height: 12),
       Text(
         preview.gpuArtifact == null
-            ? 'Demo summary · No model was run'
+            ? 'Request summary · No picture generated'
             : 'AI-generated preview',
         key: const Key('preview-disclosure'),
         style: Theme.of(context).textTheme.bodyMedium,
@@ -833,17 +831,10 @@ class _MealFlowState extends State<MealFlow> {
       ),
       const SizedBox(height: 18),
       Text(
-        'Nutrition, texture, allergens and clinical safety are unverified.',
+        preview.notices.join(' '),
+        key: const Key('preview-notices'),
         style: Theme.of(context).textTheme.bodyMedium,
       ),
-      for (final notice in preview.notices.where(
-        (notice) =>
-            notice != 'Prototype only. No model was run.' &&
-            notice != 'Preferences are requests, not verified properties.',
-      )) ...[
-        const SizedBox(height: 8),
-        Text(notice, style: Theme.of(context).textTheme.bodyMedium),
-      ],
       const SizedBox(height: 10),
       CupertinoButton(
         key: const Key('new-meal'),

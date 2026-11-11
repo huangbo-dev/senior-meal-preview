@@ -46,7 +46,7 @@ async fn health_and_catalog_are_explicitly_illustrative() {
         catalog["notice"]
             .as_str()
             .unwrap()
-            .contains("not model results")
+            .contains("Not nutrition")
     );
 }
 

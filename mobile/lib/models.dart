@@ -129,7 +129,7 @@ class Catalog {
   }) : dishes = UnmodifiableListView(dishes),
        changes = UnmodifiableListView(changes);
 
-  /// Available demo dishes in display order.
+  /// Available dishes in display order.
   final List<Dish> dishes;
 
   /// Available serving changes across all dishes.

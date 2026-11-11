@@ -27,25 +27,24 @@ final catalogJson = <String, dynamic>{
     {
       'id': 'extra_vegetables',
       'label': 'Add vegetables',
-      'description': 'An illustrative extra vegetable side',
+      'description': 'Extra vegetables on the side',
       'dish_ids': ['chicken_rice', 'fish_soup', 'tofu_rice'],
     },
     {
       'id': 'brown_rice',
       'label': 'Try brown rice',
-      'description': 'An illustrative rice swap',
+      'description': 'Brown rice instead of white rice',
       'dish_ids': ['chicken_rice', 'tofu_rice'],
     },
     {
       'id': 'sauce_on_side',
       'label': 'Sauce on the side',
-      'description': 'An illustrative serving change',
+      'description': 'Sauce served separately',
       'dish_ids': ['chicken_rice', 'tofu_rice'],
     },
   ],
   'selection': {'min_changes': 1, 'max_changes': 2},
-  'notice':
-      'Prototype only. Illustrations are not model results or nutrition advice.',
+  'notice': 'Not nutrition, allergen or medical advice.',
 };
 
 final catalog = Catalog.fromJson(catalogJson);
@@ -63,9 +62,9 @@ Map<String, dynamic> previewJson({
       .map((c) => {'id': c.id, 'label': c.label, 'description': c.description})
       .toList(),
   'preferences': preferences.toJson(),
-  'summary': 'An illustrative meal idea based on your choices.',
+  'summary': 'Your meal request.',
   'notices': [
-    'Prototype only. No model was run.',
-    'Preferences are requests, not verified properties.',
+    'Not nutrition, allergen or medical advice.',
+    'No picture was generated. Your choices are not saved.',
   ],
 };

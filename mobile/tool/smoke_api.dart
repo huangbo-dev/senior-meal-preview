@@ -13,7 +13,7 @@ Future<void> main() async {
     if (catalog.dishes.length != 3 ||
         catalog.selection.minChanges != 1 ||
         catalog.selection.maxChanges != 2) {
-      throw StateError('Expected three demo meals and 1–2 selection rules.');
+      throw StateError('Expected three meals and 1–2 selection rules.');
     }
     stdout.writeln(
       'PASS: Production client decoded catalog (${catalog.dishes.length} meals).',

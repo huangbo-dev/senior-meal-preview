@@ -149,7 +149,7 @@ void main() {
         isA<ApiException>().having(
           (e) => e.message,
           'message',
-          contains('Check your connection'),
+          contains('Check your internet connection'),
         ),
       ),
     );
@@ -271,7 +271,7 @@ void main() {
           isA<ApiException>().having(
             (e) => e.message,
             'message',
-            contains('took too long'),
+            contains('taking too long'),
           ),
         ),
       );
@@ -286,7 +286,7 @@ void main() {
           isA<ApiException>().having(
             (e) => e.message,
             'message',
-            contains('could not complete'),
+            contains('did not work'),
           ),
         ),
       );
