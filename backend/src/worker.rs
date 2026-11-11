@@ -232,6 +232,72 @@ pub fn validate_worker_url(raw: &str) -> Result<WorkerEndpoint, String> {
     })
 }
 
+/// Probe worker configuration readiness, never infer it from a configured URL alone.
+/// Dry-run, legacy/malformed replies and failures all fail closed. This does not
+/// certify visual quality, model correctness or readiness for every catalog item.
+pub async fn gpu_preview_ready(config: &GpuWorkerConfig) -> bool {
+    tokio::time::timeout(
+        config.timeout.min(Duration::from_secs(1)),
+        read_worker_readiness(config),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(false)
+}
+
+async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<bool, WorkerFailure> {
+    let addr = resolve_verified_addr(&config.endpoint).await?;
+    let mut stream = TcpStream::connect(addr)
+        .await
+        .map_err(|e| WorkerFailure::Unreachable(e.to_string()))?;
+    let auth = config
+        .bearer_token
+        .as_ref()
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "GET {}/healthz HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\nConnection: close\r\n{}\r\n",
+        config.endpoint.path_prefix, config.endpoint.host, config.endpoint.port, auth
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| WorkerFailure::Unreachable(e.to_string()))?;
+    // Health payloads are tiny. Bound both bytes and wall time, independent of generation.
+    let mut bytes = Vec::new();
+    stream
+        .take(16_385)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| WorkerFailure::Unreachable(e.to_string()))?;
+    if bytes.len() > 16_384 {
+        return Ok(false);
+    }
+    let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return Ok(false);
+    };
+    let head = String::from_utf8_lossy(&bytes[..end]);
+    if head
+        .lines()
+        .next()
+        .and_then(|s| s.split_whitespace().nth(1))
+        != Some("200")
+    {
+        return Ok(false);
+    }
+    #[derive(Deserialize)]
+    struct Readiness {
+        status: String,
+        worker_mode: String,
+        gpu_ready: bool,
+    }
+    let Ok(health) = serde_json::from_slice::<Readiness>(&bytes[end + 4..]) else {
+        return Ok(false);
+    };
+    Ok(health.status == "ok" && health.worker_mode == "gpu" && health.gpu_ready)
+}
+
 /// Call the remote GPU worker over Tailscale or loopback.
 pub async fn request_gpu_preview(
     config: &GpuWorkerConfig,

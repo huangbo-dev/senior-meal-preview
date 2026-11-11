@@ -488,22 +488,6 @@ async fn gpu_assisted_mode_bridges_to_authenticated_worker_and_validates_artifac
         ..RuntimeConfig::default()
     });
 
-    // Catalog reports gpu_preview = true when worker is configured.
-    let catalog_resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method(Method::GET)
-                .uri("/api/v1/catalog")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let catalog_bytes = catalog_resp.into_body().collect().await.unwrap().to_bytes();
-    let catalog_val: Value = serde_json::from_slice(&catalog_bytes).unwrap();
-    assert_eq!(catalog_val["capabilities"]["gpu_preview"], true);
-
     let mut body = request();
     body["render_mode"] = json!("gpu_assisted");
     let response = app
@@ -660,4 +644,131 @@ async fn ec2_api_token_and_configured_origins_are_enforced() {
         authed.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
         "https://mealpreview.example.com"
     );
+}
+
+#[tokio::test]
+async fn catalog_requires_a_current_real_gpu_health_response() {
+    use senior_meal_preview::{RuntimeConfig, worker::GpuWorkerConfig};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    for (status, payload, expected) in [
+        (
+            200,
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":true}"#,
+            true,
+        ),
+        (
+            200,
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":false}"#,
+            false,
+        ),
+        // Legacy dry-run workers incorrectly report true; mode must also be checked.
+        (
+            200,
+            r#"{"status":"ok","worker_mode":"dry-run","gpu_ready":true}"#,
+            false,
+        ),
+        (
+            200,
+            r#"{"status":"ok","worker_mode":"dry-run","gpu_ready":false}"#,
+            false,
+        ),
+        (
+            200,
+            r#"{"status":"error","worker_mode":"gpu","gpu_ready":true}"#,
+            false,
+        ),
+        (200, r#"{"gpu_ready":true}"#, false),
+        (
+            200,
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":"true"}"#,
+            false,
+        ),
+        (200, "not json", false),
+        (
+            503,
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":true}"#,
+            false,
+        ),
+        (
+            401,
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":true}"#,
+            false,
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let mut chunk = [0; 512];
+                let n = socket.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..n]);
+                if bytes.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let req = String::from_utf8_lossy(&bytes);
+            assert!(req.starts_with("GET /prefix/healthz HTTP/1.1"));
+            assert!(req.contains("Authorization: Bearer test-only-token"));
+            let response = format!(
+                "HTTP/1.1 {status} Status\r\nContent-Length: {}\r\n\r\n{payload}",
+                payload.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let cfg = GpuWorkerConfig::new(
+            &format!("http://{addr}/prefix"),
+            Some("test-only-token".into()),
+            std::time::Duration::from_secs(2),
+            1,
+        )
+        .unwrap();
+        let response = senior_meal_preview::app_with_config(RuntimeConfig {
+            gpu_worker: Some(cfg),
+            ..RuntimeConfig::default()
+        })
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/catalog")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let catalog: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            catalog["capabilities"]["gpu_preview"], expected,
+            "{status}: {payload}"
+        );
+        assert_eq!(catalog["capabilities"]["symbolic_preview"], true);
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn readiness_timeout_and_unreachable_worker_fail_closed() {
+    use senior_meal_preview::worker::{GpuWorkerConfig, gpu_preview_ready};
+    use tokio::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let cfg = GpuWorkerConfig::new(
+        &format!("http://{addr}"),
+        None,
+        std::time::Duration::from_millis(20),
+        1,
+    )
+    .unwrap();
+    assert!(!gpu_preview_ready(&cfg).await);
+    drop(listener);
+    assert!(!gpu_preview_ready(&cfg).await);
 }

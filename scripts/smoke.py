@@ -101,7 +101,7 @@ try:
 
         with urllib.request.urlopen(base_url + "/api/v1/catalog", timeout=5) as response:
             catalog = json.load(response)
-        assert catalog["capabilities"] == {"symbolic_preview": True, "gpu_preview": True}, catalog
+        assert catalog["capabilities"] == {"symbolic_preview": True, "gpu_preview": False}, catalog
         selection = {"dish_id": "chicken_rice", "change_ids": ["brown_rice"]}
         status, body = post(selection)
         assert status == 200 and "gpu_artifact" not in body, (status, body)

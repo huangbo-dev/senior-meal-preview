@@ -12,7 +12,7 @@ When `MODEL_WORKER_URL` is configured on EC2, `gpu_worker` reports `{"configured
 
 ## GET /api/v1/catalog
 
-Returns `dishes`, `changes`, `selection`, `capabilities`, and `notice`. Each dish has `id`, `name`, `description`, `color`. Each change has `id`, `label`, `description`, and compatible `dish_ids`. `selection` publishes the server's enforced limits (`{"min_changes": 1, "max_changes": 2}`) and `capabilities` advertises `{"symbolic_preview": true, "gpu_preview": <bool>}` so clients know whether the EC2 gateway has a Tailscale GPU worker configured; older v1 clients that ignore these additive fields remain compatible.
+Returns `dishes`, `changes`, `selection`, `capabilities`, and `notice`. Each dish has `id`, `name`, `description`, `color`. Each change has `id`, `label`, `description`, and compatible `dish_ids`. `selection` publishes the server's enforced limits (`{"min_changes": 1, "max_changes": 2}`) and `capabilities` advertises `{"symbolic_preview": true, "gpu_preview": <bool>}` so clients know whether a current, bounded worker health probe reports real GPU mode with configuration readiness. A configured URL alone, dry-run mode, a malformed response or an unreachable worker advertises false. This is not quality certification or a guarantee that every request succeeds; older v1 clients that ignore these additive fields remain compatible.
 
 Dish IDs: `chicken_rice`, `fish_soup`, `tofu_rice`.
 

@@ -586,7 +586,11 @@ pub fn app_with_config(config: RuntimeConfig) -> Router {
         .route(
             "/api/v1/catalog",
             get(|State(cfg): State<Arc<RuntimeConfig>>| async move {
-                Json(catalog_for(cfg.gpu_worker.is_some()))
+                let gpu_ready = match cfg.gpu_worker.as_ref() {
+                    Some(worker) => worker::gpu_preview_ready(worker).await,
+                    None => false,
+                };
+                Json(catalog_for(gpu_ready))
             }),
         )
         .route("/api/v1/preview", post(preview))

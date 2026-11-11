@@ -74,7 +74,7 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
             health = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(health["status"], "ok")
             self.assertEqual(health["worker_mode"], "dry-run")
-            self.assertTrue(health["gpu_ready"])
+            self.assertFalse(health["gpu_ready"])
 
         payload = json.dumps(
             {
@@ -143,6 +143,24 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
             self.assertFalse(artifact["checker_passed"])
             self.assertTrue(artifact["image_data_url"].startswith("data:image/png;base64,"))
             self.assertIn("not a real meal", artifact["generated_label"].lower())
+
+    def test_dry_run_never_checks_or_advertises_real_gpu_readiness(self) -> None:
+        server, base_url = self._start_server(mode="dry-run", token=None)
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        with mock.patch.object(gpu_worker, "is_gpu_pipeline_ready", return_value=True) as ready:
+            with urllib.request.urlopen(f"{base_url}/healthz", timeout=3) as resp:
+                self.assertFalse(json.loads(resp.read())["gpu_ready"])
+            ready.assert_not_called()
+
+    def test_gpu_health_reports_configured_readiness(self) -> None:
+        server, base_url = self._start_server(mode="gpu", token=None)
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        for configured in (False, True):
+            with mock.patch.object(gpu_worker, "is_gpu_pipeline_ready", return_value=configured):
+                with urllib.request.urlopen(f"{base_url}/healthz", timeout=3) as resp:
+                    self.assertEqual(json.loads(resp.read())["gpu_ready"], configured)
 
     def test_gpu_mode_fails_closed_when_unconfigured_and_runs_cmd_when_configured(self) -> None:
         server, base_url = self._start_server(mode="gpu", token="gpu-token")

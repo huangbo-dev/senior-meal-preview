@@ -22,7 +22,7 @@ By default, previews are deterministic symbolic plate drawings (`render_mode: "i
 1. Load the meal and change catalog from the Rust API (`GET /api/v1/catalog`), including enforced selection bounds (`1–2` changes) and server capabilities (`symbolic_preview`, `gpu_preview`).
 2. Select one of three familiar meals (`Chicken rice`, `Fish soup`, `Tofu rice`) on a single-screen layout where the primary CTA (`Choose my changes`) sits above the fold on a `390×844` phone screen.
 3. Select one or two compatible changes (`Add vegetables`, `Try brown rice`, `Sauce on the side`) with dish-specific copy (`"Choose this change to see an idea"` for Fish soup) and an inline explanation when the 2-change limit is reached.
-4. Optionally select `Texture` (`No preference` / `Soft`), `Flavour` (`No preference` / `Mild`), and—when the server advertises a Tailscale GPU worker—`Preview engine` (`Symbolic drawing` / `Tailscale GPU model`).
+4. Optionally select `Texture` (`No preference` / `Soft`), `Flavour` (`No preference` / `Mild`), and—when a bounded live health check advertises a configured real-mode GPU worker—`Preview engine` (`Symbolic drawing` / `Tailscale GPU model`).
 5. View the requested changes (`What you requested` with neutral bullets) followed by framed `Original idea` and `Requested idea` plates (and `GpuPreviewCard` provenance when `gpu_assisted` is used).
 6. Change choices, retry failed requests, or start over without saving personal records.
 

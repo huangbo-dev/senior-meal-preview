@@ -490,7 +490,7 @@ class WorkerHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "worker_mode": self.mode,
-                    "gpu_ready": True if self.mode == "dry-run" else is_gpu_pipeline_ready(),
+                    "gpu_ready": self.mode == "gpu" and is_gpu_pipeline_ready(),
                 },
             )
             return
