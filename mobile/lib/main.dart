@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -47,6 +49,8 @@ class _MealFlowState extends State<MealFlow> {
   String? _error;
   int _step = 0;
   int _requestVersion = 0;
+  bool _slowLoad = false;
+  Timer? _slowTimer;
 
   @override
   void initState() {
@@ -59,6 +63,7 @@ class _MealFlowState extends State<MealFlow> {
   @override
   void dispose() {
     _requestVersion++;
+    _slowTimer?.cancel();
     _headingFocus.dispose();
     _scroll.dispose();
     if (_ownsApi) _api.close();
@@ -69,10 +74,22 @@ class _MealFlowState extends State<MealFlow> {
     final version = ++_requestVersion;
     setState(() {
       _loading = true;
+      _slowLoad = false;
       _error = null;
     });
+    _slowTimer?.cancel();
+    _slowTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted && _loading && version == _requestVersion) {
+        setState(() => _slowLoad = true);
+      }
+    });
     try {
-      final catalog = await _api.fetchCatalog();
+      final catalog = await _api.fetchCatalog().timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw const ApiException(
+          'The meal service is not answering. Check your internet connection, then try again.',
+        ),
+      );
       if (!mounted || version != _requestVersion) return;
       setState(() {
         _catalog = catalog;
@@ -402,6 +419,19 @@ class _MealFlowState extends State<MealFlow> {
         ),
         const SizedBox(height: 24),
         const Text('Getting the meal choices…'),
+        if (_slowLoad) ...[
+          const SizedBox(height: 24),
+          const Text(
+            'Still trying. This is taking longer than usual.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          AppPrimaryButton(
+            key: const Key('retry-slow-catalog'),
+            onPressed: _loadCatalog,
+            label: 'Try again',
+          ),
+        ],
       ],
     ),
   );

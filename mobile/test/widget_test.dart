@@ -21,10 +21,12 @@ class FakeApi implements MealApi {
   MealPreferences? sentPreferences;
   String? sentRenderMode;
   Completer<MealPreview>? pending;
+  Completer<Catalog>? pendingCatalog;
 
   @override
   Future<Catalog> fetchCatalog() async {
     catalogCalls++;
+    if (pendingCatalog != null) return pendingCatalog!.future;
     if (failCatalog) {
       throw const ApiException('Cannot reach the local service.');
     }
@@ -240,6 +242,24 @@ void main() {
     api.failCatalog = false;
     await tapKey(tester, 'retry-catalog');
     expect(api.catalogCalls, 2);
+    expect(find.byKey(const Key('dish-chicken_rice')), findsOneWidget);
+  });
+
+  testWidgets('stalled catalog offers retry, then times out to an error', (
+    tester,
+  ) async {
+    final api = FakeApi()..pendingCatalog = Completer<Catalog>();
+    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pump();
+    expect(find.text('Getting the meal choices…'), findsOneWidget);
+    expect(find.byKey(const Key('retry-slow-catalog')), findsNothing);
+    await tester.pump(const Duration(seconds: 9));
+    expect(find.byKey(const Key('retry-slow-catalog')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+    expect(find.text('Let’s reconnect'), findsOneWidget);
+    api.pendingCatalog = null;
+    await tapKey(tester, 'retry-catalog');
     expect(find.byKey(const Key('dish-chicken_rice')), findsOneWidget);
   });
 
