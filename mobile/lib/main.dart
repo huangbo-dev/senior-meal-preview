@@ -10,6 +10,9 @@ import 'photo_flow.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
+/// Shown in About; keep in step with `version:` in pubspec.yaml and CHANGELOG.md.
+const appVersion = '0.2.0';
+
 void main() => runApp(const MealPreviewApp());
 
 class MealPreviewApp extends StatelessWidget {
@@ -385,6 +388,12 @@ class _MealFlowState extends State<MealFlow> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SectionHeading('About'),
+              const SizedBox(height: 4),
+              Text(
+                'SG Food Edit · version $appVersion',
+                key: const Key('app-version'),
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(height: 10),
               const Text(
                 'Meal photos are reference photos, not your meal. Not nutrition, allergen or medical advice.',
