@@ -1,6 +1,6 @@
 # A little change — Android debug APKs (0.1.0)
 
-Built on 2026-11-12 from source commit `cf2a9c2` with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-12 from source commit `1d92c5f` with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 
 | File | For |
