@@ -17,7 +17,7 @@ class MealPreviewApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Meal preview',
+    title: 'SG Food Edit',
     debugShowCheckedModeBanner: false,
     theme: buildAppTheme(),
     home: MealFlow(api: api),

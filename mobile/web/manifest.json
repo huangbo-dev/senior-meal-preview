@@ -1,6 +1,6 @@
 {
-    "name": "A little change",
-    "short_name": "Meal preview",
+    "name": "SG Food Edit",
+    "short_name": "SG Food Edit",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F8F6EF",

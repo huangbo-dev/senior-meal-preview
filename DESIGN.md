@@ -1,4 +1,4 @@
-# A little change: UI design specification
+# SG Food Edit: UI design specification
 
 **Scope:** this app repository only. Separate, non-submission Flutter + Rust app.
 **Design baseline:** commit `023aac0ceab7d64fd795345277fec93d086b8dc7`, P0/P1 pass implemented 8 November 2026.
@@ -46,7 +46,7 @@ There is no bottom navigation, login, dashboard, camera, history, saving, nutrit
 
 ## 3. Visual direction
 
-**Working name:** A little change. Preserve it unless the user requests a rename.
+**App name:** SG Food Edit (renamed from "A little change" at the user's request, 2026-11-12).
 
 Use warm cream, deep green text/action surfaces, white cards, restrained sage selection fills and simple plate illustrations. The green denotes the interface and selection state, not health approval. Keep the large, readable type and generous control spacing. Prefer short, descriptive labels to decorative copy; one primary action per screen. Avoid extra gradients, glass effects, busy photography, pill-shaped metrics and dashboard chrome.
 

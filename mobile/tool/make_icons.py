@@ -1,4 +1,4 @@
-"""Generate the "A little change" launcher icons (Android, adaptive, iOS, web).
+"""Generate the "SG Food Edit" launcher icons (Android, adaptive, iOS, web).
 
 Design: a cream plate on the app's ink-green background, with one small leaf
 on the plate — "a little change" to a meal. Colors come from DESIGN.md tokens.

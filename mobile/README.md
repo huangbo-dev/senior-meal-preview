@@ -1,4 +1,4 @@
-# A little change · Flutter client
+# SG Food Edit · Flutter client
 
 Accessible meal-change preview client for Android, iOS, and Web, isolated from the CE7454 coursework submission.
 
