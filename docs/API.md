@@ -55,6 +55,24 @@ Error shape:
 
 Errors do not echo submitted content. Repeating a valid request returns the same descriptive response and creates no persistent data.
 
+## POST /api/v1/photo-preview
+
+Edits a photo the user took. Body limit 8 MiB (other routes stay at 16 KiB). Unknown fields are rejected.
+
+```json
+{"change_id":"brown_rice","image_png_base64":"iVBORw0KGgo…","mask_png_base64":"iVBORw0KGgo…"}
+```
+
+- `change_id`: `brown_rice` or `extra_vegetables` only (the two research tasks), one per request.
+- `image_png_base64`: square PNG. The app centre-crops and re-encodes it at 1024×1024 on the phone, which drops EXIF/GPS metadata.
+- `mask_png_base64`: same-size PNG, white where the user painted the rice. The worker requires 0.5–85 % coverage.
+
+Success returns `schema_version: 1`, `edit_target`, `notices` and a `gpu_artifact` (same schema as above, `generated_label` begins "Experimental AI edit of your photo, not reviewed by a person"). The worker writes the photo only to a per-request temporary directory and deletes it afterwards; `WORKER_RUN_DIR` is ignored for user photos. Nothing is stored by the gateway.
+
+Errors: `400 unsupported_change`, `400 photo_invalid` (gateway check or worker could not use the photo/mask), `503 gpu_unavailable` (no worker), plus the GPU errors listed above. `GET /api/v1/catalog` advertises `capabilities.photo_upload` from the worker's `photo_ready` health field, separately from `gpu_preview`.
+
+Quality: on 12 Nov 2026 a public Wikimedia chicken rice photo, brown-rice request, passed the checker in one attempt (≈15 s through the tunnel) but replaced the rice dome with a patterned bowl of grain and garnish. Treat results as unreviewed experiments, for project-team use only.
+
 ## Local browser development
 
 CORS permits only exact HTTP loopback origins using `localhost` or `127.0.0.1` and a valid port. No credentials are allowed. Native emulator requests do not rely on browser CORS. This restriction is a development safeguard, not an authorization mechanism. No endpoint should be forwarded to a public network.

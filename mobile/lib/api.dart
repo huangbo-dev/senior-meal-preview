@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -16,6 +17,14 @@ abstract interface class MealApi {
     required List<String> changeIds,
     required MealPreferences preferences,
     String renderMode = 'illustrative_only',
+  });
+
+  /// Asks `POST /api/v1/photo-preview` to apply [changeId] inside the painted
+  /// [maskPng] of [imagePng]. Both are PNG bytes of the same square size.
+  Future<PhotoEditResult> editPhoto({
+    required String changeId,
+    required Uint8List imagePng,
+    required Uint8List maskPng,
   });
 
   /// Releases any underlying HTTP client resources.
@@ -59,6 +68,7 @@ class HttpMealApi implements MealApi {
     String authToken = const String.fromEnvironment('API_AUTH_TOKEN'),
     http.Client? client,
     this.timeout = const Duration(seconds: 28),
+    this.photoTimeout = const Duration(seconds: 95),
   }) : _baseUrl = resolveApiBaseUrl(baseUrl, Uri.base),
        _authToken = authToken.trim(),
        _client = client ?? http.Client();
@@ -69,6 +79,9 @@ class HttpMealApi implements MealApi {
 
   /// Maximum duration to wait for a single HTTP request before failing.
   final Duration timeout;
+
+  /// Upload plus model editing can take a minute; the HTTPS tunnel allows 100 s.
+  final Duration photoTimeout;
 
   Map<String, String> _headers({bool jsonBody = false}) => {
     if (jsonBody) 'Content-Type': 'application/json',
@@ -123,12 +136,32 @@ class HttpMealApi implements MealApi {
     );
   }
 
+  @override
+  Future<PhotoEditResult> editPhoto({
+    required String changeId,
+    required Uint8List imagePng,
+    required Uint8List maskPng,
+  }) => _perform(
+    () => _client.post(
+      _endpoint('/api/v1/photo-preview'),
+      headers: _headers(jsonBody: true),
+      body: jsonEncode({
+        'change_id': changeId,
+        'image_png_base64': base64Encode(imagePng),
+        'mask_png_base64': base64Encode(maskPng),
+      }),
+    ),
+    PhotoEditResult.fromJson,
+    limit: photoTimeout,
+  );
+
   Future<T> _perform<T>(
     Future<http.Response> Function() request,
-    T Function(Map<String, dynamic>) decode,
-  ) async {
+    T Function(Map<String, dynamic>) decode, {
+    Duration? limit,
+  }) async {
     try {
-      final response = await request().timeout(timeout);
+      final response = await request().timeout(limit ?? timeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ApiException(_errorMessage(response));
       }

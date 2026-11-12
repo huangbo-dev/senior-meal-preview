@@ -546,6 +546,106 @@ class BuiltinSgeditAdapterTests(unittest.TestCase):
             status, body = post({"dish_id": "chicken_rice", "change_ids": ["brown_rice"]})
         self.assertEqual((status, body["error"]), (503, "gpu_pipeline_unready"))
 
+    def _photo_b64(self, size: int = 1024, box: tuple[int, int, int, int] = (300, 400, 700, 800)) -> tuple[str, str]:
+        import base64
+        import io
+
+        from PIL import Image
+
+        def enc(img) -> str:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+
+        mask = Image.new("L", (size, size), 0)
+        mask.paste(255, box)
+        return enc(Image.new("RGB", (size, size), (210, 200, 180))), enc(mask)
+
+    def test_photo_edit_runs_research_task_on_uploaded_pixels_and_keeps_nothing(self) -> None:
+        import glob
+        import tempfile
+
+        image, mask = self._photo_b64(size=800, box=(200, 300, 560, 640))
+        run_dir = os.path.join(self.tmp.name, "runs")
+        os.makedirs(run_dir)
+        before = set(glob.glob(os.path.join(tempfile.gettempdir(), "meal-photo-*")))
+        with mock.patch.dict(os.environ, {"WORKER_RUN_DIR": run_dir, "WORKER_FIXTURE_DIR": ""}):
+            art = gpu_worker.run_photo_pipeline("brown_rice", image, mask)
+        self.assertEqual(art["provider"], "tailscale-gpu-worker")
+        self.assertIn("your photo", art["generated_label"])
+        self.assertIn("not", art["generated_label"].lower())
+        (req,) = self.checker_requests
+        self.assertEqual((req["task"], req["source"]), ("T2", "rice"))
+        self.assertTrue(req["original"].endswith("input.png"))
+        self.assertFalse(os.path.exists(req["original"]))  # deleted after the request
+        self.assertEqual(os.listdir(run_dir), [])  # WORKER_RUN_DIR never keeps user photos
+        self.assertEqual(set(glob.glob(os.path.join(tempfile.gettempdir(), "meal-photo-*"))), before)
+
+    def test_photo_edit_rejects_bad_uploads_before_generation(self) -> None:
+        image, mask = self._photo_b64()
+        _, empty = self._photo_b64(box=(0, 0, 1, 1))
+        _, everything = self._photo_b64(box=(0, 0, 1024, 1024))
+        _, small_mask = self._photo_b64(size=512)
+        cases = [
+            ("brown_rice", "not base64!", mask),
+            ("brown_rice", "aGVsbG8=", mask),  # base64 but not a PNG
+            ("brown_rice", image, empty),
+            ("brown_rice", image, everything),
+            ("brown_rice", image, small_mask),
+            ("brown_rice", None, mask),
+        ]
+        for change, img, msk in cases:
+            with self.assertRaises(gpu_worker.PhotoRequestError):
+                gpu_worker.run_photo_pipeline(change, img, msk)
+        with self.assertRaises(gpu_worker.GpuRequestUnsupportedError):
+            gpu_worker.run_photo_pipeline("sauce_on_side", image, mask)
+        self.assertEqual(self.editor.specs, [])
+        self.assertEqual(self.checker_requests, [])
+
+    def test_photo_http_route_statuses(self) -> None:
+        def serve(mode: str) -> str:
+            class Handler(gpu_worker.WorkerHandler):
+                expected_token = None
+
+                def log_message(self, fmt: str, *args: object) -> None:
+                    pass
+
+            Handler.mode = mode
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            return f"http://127.0.0.1:{server.server_address[1]}"
+
+        def post(base: str, body: dict) -> tuple[int, dict]:
+            req = urllib.request.Request(f"{base}/v1/generate-photo", data=json.dumps(body).encode(), method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.status, json.loads(resp.read())
+            except urllib.error.HTTPError as err:
+                with err:
+                    return err.code, json.loads(err.read())
+
+        image, mask = self._photo_b64()
+        ok = {"schema_version": 1, "change_id": "extra_vegetables", "image_png_base64": image, "mask_png_base64": mask}
+        gpu = serve("gpu")
+        status, body = post(gpu, ok)
+        self.assertEqual((status, body["provider"]), (200, "tailscale-gpu-worker"))
+        self.assertEqual(post(gpu, {**ok, "mask_png_base64": "x"})[0], 400)
+        self.assertEqual(post(gpu, {**ok, "photo_url": "http://example.com"})[0], 400)
+        self.assertEqual(post(gpu, {**ok, "change_id": "sauce_on_side"})[0], 422)
+        status, body = post(serve("dry-run"), ok)
+        self.assertEqual((status, body["error"]), (503, "gpu_pipeline_unready"))
+
+    def test_public_model_name_never_exposes_local_paths(self) -> None:
+        name = gpu_worker.public_model_name
+        self.assertEqual(
+            name("/home/x/cache/hf/models--Qwen--Qwen2.5-VL-7B-Instruct/snapshots/cc59"),
+            "Qwen/Qwen2.5-VL-7B-Instruct",
+        )
+        self.assertEqual(name("/srv/weights/qwen-checker/"), "qwen-checker")
+        self.assertEqual(name("qwen2.5-vl checker"), "qwen2.5-vl checker")
+
     def test_fake_editor_matches_real_editor_signature(self) -> None:
         import inspect
 

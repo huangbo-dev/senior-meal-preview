@@ -87,6 +87,17 @@ pub struct WorkerGenerateRequest {
     pub flavour: Flavour,
 }
 
+/// Request sent to `<MODEL_WORKER_URL>/v1/generate-photo`: one research change applied inside a
+/// user-painted mask on a user-taken photo. Both images are PNG (re-encoded on the phone, so they
+/// carry no EXIF/location metadata); the worker deletes them when the request finishes.
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkerPhotoRequest {
+    pub schema_version: u8,
+    pub change_id: String,
+    pub image_png_base64: String,
+    pub mask_png_base64: String,
+}
+
 /// Provenance and output returned by the GPU worker and forwarded to the client.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -118,6 +129,8 @@ pub enum WorkerFailure {
     Unsupported,
     /// The worker is reachable but its models, fixtures or checker are not ready (HTTP 503).
     NotReady,
+    /// The worker could not use the uploaded photo or mask (HTTP 400).
+    BadPhoto,
     Unreachable(String),
     InvalidResponse(String),
 }
@@ -236,6 +249,19 @@ pub fn validate_worker_url(raw: &str) -> Result<WorkerEndpoint, String> {
 /// Dry-run, legacy/malformed replies and failures all fail closed. This does not
 /// certify visual quality, model correctness or readiness for every catalog item.
 pub async fn gpu_preview_ready(config: &GpuWorkerConfig) -> bool {
+    worker_readiness(config).await.gpu_preview
+}
+
+/// What a current worker health probe says is usable. Everything fails closed to false.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkerReadiness {
+    /// Catalog dish previews (needs every dish fixture).
+    pub gpu_preview: bool,
+    /// Edits of user-taken photos (needs only the built-in model path).
+    pub photo_upload: bool,
+}
+
+pub async fn worker_readiness(config: &GpuWorkerConfig) -> WorkerReadiness {
     tokio::time::timeout(
         config.timeout.min(Duration::from_secs(1)),
         read_worker_readiness(config),
@@ -243,10 +269,10 @@ pub async fn gpu_preview_ready(config: &GpuWorkerConfig) -> bool {
     .await
     .ok()
     .and_then(Result::ok)
-    .unwrap_or(false)
+    .unwrap_or_default()
 }
 
-async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<bool, WorkerFailure> {
+async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<WorkerReadiness, WorkerFailure> {
     let addr = resolve_verified_addr(&config.endpoint).await?;
     let mut stream = TcpStream::connect(addr)
         .await
@@ -272,10 +298,10 @@ async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<bool, WorkerF
         .await
         .map_err(|e| WorkerFailure::Unreachable(e.to_string()))?;
     if bytes.len() > 16_384 {
-        return Ok(false);
+        return Ok(WorkerReadiness::default());
     }
     let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
-        return Ok(false);
+        return Ok(WorkerReadiness::default());
     };
     let head = String::from_utf8_lossy(&bytes[..end]);
     if head
@@ -284,18 +310,24 @@ async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<bool, WorkerF
         .and_then(|s| s.split_whitespace().nth(1))
         != Some("200")
     {
-        return Ok(false);
+        return Ok(WorkerReadiness::default());
     }
     #[derive(Deserialize)]
     struct Readiness {
         status: String,
         worker_mode: String,
         gpu_ready: bool,
+        #[serde(default)]
+        photo_ready: bool,
     }
     let Ok(health) = serde_json::from_slice::<Readiness>(&bytes[end + 4..]) else {
-        return Ok(false);
+        return Ok(WorkerReadiness::default());
     };
-    Ok(health.status == "ok" && health.worker_mode == "gpu" && health.gpu_ready)
+    let real = health.status == "ok" && health.worker_mode == "gpu";
+    Ok(WorkerReadiness {
+        gpu_preview: real && health.gpu_ready,
+        photo_upload: real && health.photo_ready,
+    })
 }
 
 /// Call the remote GPU worker over Tailscale or loopback.
@@ -309,9 +341,34 @@ pub async fn request_gpu_preview(
         .try_acquire_owned()
         .map_err(|_| WorkerFailure::Busy)?;
 
-    tokio::time::timeout(config.timeout, send_worker_http(config, payload))
-        .await
-        .map_err(|_| WorkerFailure::Timeout)?
+    let body = serde_json::to_vec(payload)
+        .map_err(|e| WorkerFailure::InvalidResponse(format!("Cannot encode request: {e}")))?;
+    tokio::time::timeout(
+        config.timeout,
+        send_worker_http(config, "/v1/generate", body),
+    )
+    .await
+    .map_err(|_| WorkerFailure::Timeout)?
+}
+
+/// Ask the worker to edit a user-taken photo inside its painted mask.
+pub async fn request_gpu_photo_edit(
+    config: &GpuWorkerConfig,
+    payload: &WorkerPhotoRequest,
+) -> Result<GpuArtifact, WorkerFailure> {
+    let _permit = config
+        .semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| WorkerFailure::Busy)?;
+    let body = serde_json::to_vec(payload)
+        .map_err(|e| WorkerFailure::InvalidResponse(format!("Cannot encode request: {e}")))?;
+    tokio::time::timeout(
+        config.timeout,
+        send_worker_http(config, "/v1/generate-photo", body),
+    )
+    .await
+    .map_err(|_| WorkerFailure::Timeout)?
 }
 
 async fn resolve_verified_addr(endpoint: &WorkerEndpoint) -> Result<SocketAddr, WorkerFailure> {
@@ -341,16 +398,15 @@ async fn resolve_verified_addr(endpoint: &WorkerEndpoint) -> Result<SocketAddr, 
 
 async fn send_worker_http(
     config: &GpuWorkerConfig,
-    payload: &WorkerGenerateRequest,
+    route: &str,
+    body: Vec<u8>,
 ) -> Result<GpuArtifact, WorkerFailure> {
     let addr = resolve_verified_addr(&config.endpoint).await?;
     let mut stream = TcpStream::connect(addr)
         .await
         .map_err(|e| WorkerFailure::Unreachable(format!("Cannot connect to GPU worker: {e}")))?;
 
-    let body = serde_json::to_vec(payload)
-        .map_err(|e| WorkerFailure::InvalidResponse(format!("Cannot encode request: {e}")))?;
-    let path = format!("{}/v1/generate", config.endpoint.path_prefix);
+    let path = format!("{}{route}", config.endpoint.path_prefix);
     let auth_header = match config.bearer_token {
         Some(ref token) => format!("Authorization: Bearer {token}\r\n"),
         None => String::new(),
@@ -409,6 +465,7 @@ async fn send_worker_http(
     let json_slice = &response_bytes[header_end + 4..];
     match status_code {
         200..300 => {}
+        400 => return Err(WorkerFailure::BadPhoto),
         422 => return Err(WorkerFailure::Unsupported),
         503 => return Err(WorkerFailure::NotReady),
         _ => {

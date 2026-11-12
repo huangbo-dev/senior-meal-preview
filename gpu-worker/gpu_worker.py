@@ -63,6 +63,11 @@ PROMPT_SET = "tuned"
 DEFAULT_CHECKER_URL = "http://127.0.0.1:8781"
 # The Rust gateway rejects worker responses over 4 MiB; keep the preview well inside that.
 MAX_IMAGE_DATA_URL_BYTES = 3 * 1024 * 1024
+# User photo uploads: request body cap, per-image base64 cap and allowed painted-area fraction.
+MAX_PHOTO_BODY_BYTES = 8 * 1024 * 1024
+MAX_PHOTO_B64_CHARS = 6 * 1024 * 1024
+MIN_MASK_COVERAGE = 0.005
+MAX_MASK_COVERAGE = 0.85
 
 DISH_RGB = {
     "chicken_rice": (202, 129, 74),
@@ -74,10 +79,18 @@ GENERATED_DISCLOSURE = (
     "AI-generated preview via private Tailscale GPU worker · "
     "Not a real meal or clinical verification"
 )
+PHOTO_DISCLOSURE = (
+    "Experimental AI edit of your photo, not reviewed by a person · "
+    "Not nutrition, allergen or clinical verification"
+)
 
 
 class GpuPipelineUnreadyError(RuntimeError):
     """Raised when `--mode gpu` is active but GPU fixtures or weights are unavailable."""
+
+
+class PhotoRequestError(ValueError):
+    """Raised when an uploaded photo or mask is malformed (HTTP 400)."""
 
 
 class GpuRequestUnsupportedError(RuntimeError):
@@ -213,6 +226,18 @@ def is_gpu_pipeline_ready() -> bool:
     )
 
 
+def public_model_name(name: str) -> str:
+    """Model identifier safe to send to phones: a hub ID or file name, never a local path."""
+    if "models--" in name:
+        return name.split("models--", 1)[1].split("/", 1)[0].replace("--", "/")
+    return name.rstrip("/").rsplit("/", 1)[-1] or "checker"
+
+
+def is_photo_pipeline_ready() -> bool:
+    """Photo edits need the built-in sgedit path (no catalog fixtures, no external command)."""
+    return not os.environ.get("WORKER_GPU_CMD", "").strip() and sgedit_root() is not None
+
+
 def build_dry_run_artifact(
     dish_id: str,
     change_ids: list[str],
@@ -289,7 +314,7 @@ def run_gpu_pipeline(
 
 
 def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, object]:
-    """Check-and-retry with the research contracts; returns the selected candidate.
+    """Check-and-retry with the research contracts on a catalog dish fixture.
 
     Mirrors the retry arm of `sgedit.loop.Runner.run` (generate, check, stop at the
     first pass, otherwise `next_spec`, at most K generations, select by score) without
@@ -314,7 +339,121 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
             raise GpuPipelineUnreadyError(f"Missing dish fixture: {path}")
 
     research = load_research()
-    np, Image, loop = research.np, research.Image, research.loop
+    np, Image = research.np, research.Image
+    try:
+        image = Image.open(input_path).convert("RGB")
+        mask = np.asarray(Image.open(mask_path).convert("L")) > 127
+    except Exception as exc:
+        raise GpuPipelineUnreadyError(f"Cannot read dish fixture: {type(exc).__name__}: {exc}") from exc
+    expected = (FIXTURE_SIDE, FIXTURE_SIDE)
+    if image.size != expected or mask.shape != expected:
+        raise GpuPipelineUnreadyError(
+            f"Fixtures must be {FIXTURE_SIDE}x{FIXTURE_SIDE}: {input_path.name} is {image.size}, "
+            f"{mask_path.name} is {mask.shape[::-1]}."
+        )
+    if not mask.any():
+        raise GpuPipelineUnreadyError(f"Mask has no editable pixels: {mask_path}")
+    return _run_sgedit(
+        research,
+        image=image,
+        mask=mask,
+        original_path=input_path,
+        job_name=dish_id,
+        change_id=change_ids[0],
+        task=task,
+        source=source,
+        provenance={
+            "dish_id": dish_id,
+            "input": {"path": str(input_path), "sha256": _sha256_file(input_path)},
+            "mask": {"path": str(mask_path), "sha256": _sha256_file(mask_path)},
+        },
+        retain=True,
+    )
+
+
+def _decode_png_b64(value: object, what: str):
+    """Decode a base64 PNG from an uploaded request, failing as a bad request."""
+    if not isinstance(value, str) or not value or len(value) > MAX_PHOTO_B64_CHARS:
+        raise PhotoRequestError(f"{what} is missing or too large.")
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise PhotoRequestError(f"{what} is not valid base64.") from exc
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise PhotoRequestError(f"{what} must be a PNG image.")
+    return raw
+
+
+def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> dict[str, object]:
+    """Edit a user-supplied photo inside a user-painted mask.
+
+    The photo and mask exist only in a per-request temporary directory and are deleted
+    when the request finishes, even when WORKER_RUN_DIR is set: user photos are never
+    retained. Only the research rice tasks are supported, one change per photo.
+    """
+    if change_id not in BUILTIN_TASKS:
+        raise GpuRequestUnsupportedError(
+            f"Photo edits support exactly one of {sorted(BUILTIN_TASKS)}."
+        )
+    image_raw = _decode_png_b64(image_b64, "Photo")
+    mask_raw = _decode_png_b64(mask_b64, "Mask")
+    research = load_research()
+    np, Image = research.np, research.Image
+    try:
+        image = Image.open(io.BytesIO(image_raw))
+        image.load()
+        mask_img = Image.open(io.BytesIO(mask_raw))
+        mask_img.load()
+    except Exception as exc:
+        raise PhotoRequestError("Photo or mask could not be decoded.") from exc
+    if min(image.size) < 256 or max(image.size) > 4096:
+        raise PhotoRequestError("Photo must be between 256 and 4096 pixels on each side.")
+    if mask_img.size != image.size:
+        raise PhotoRequestError("Mask must be the same size as the photo.")
+    # Re-encode from pixels only: this drops EXIF, GPS and any other metadata.
+    side = (FIXTURE_SIDE, FIXTURE_SIDE)
+    image = image.convert("RGB").resize(side, Image.LANCZOS)
+    mask = np.asarray(mask_img.convert("L").resize(side, Image.NEAREST)) > 127
+    coverage = float(mask.mean())
+    if coverage < MIN_MASK_COVERAGE or coverage > MAX_MASK_COVERAGE:
+        raise PhotoRequestError(
+            "Paint over the rice only: the painted area must cover between "
+            f"{MIN_MASK_COVERAGE:.0%} and {MAX_MASK_COVERAGE:.0%} of the photo."
+        )
+    with tempfile.TemporaryDirectory(prefix="meal-photo-") as tmp:
+        original = Path(tmp) / "input.png"
+        image.save(original)
+        return _run_sgedit(
+            research,
+            image=image,
+            mask=mask,
+            original_path=original,
+            job_name="user_photo",
+            change_id=change_id,
+            task=BUILTIN_TASKS[change_id],
+            source="rice",
+            provenance={"input": "user photo (not retained)", "mask_coverage": round(coverage, 4)},
+            retain=False,
+            generated_label=PHOTO_DISCLOSURE,
+        )
+
+
+def _run_sgedit(
+    research: SimpleNamespace,
+    *,
+    image,
+    mask,
+    original_path: Path,
+    job_name: str,
+    change_id: str,
+    task: str,
+    source: str,
+    provenance: dict[str, object],
+    retain: bool,
+    generated_label: str = GENERATED_DISCLOSURE,
+) -> dict[str, object]:
+    """Shared check-and-retry core for catalog fixtures and user photos."""
+    loop, Image = research.loop, research.Image
     try:
         max_attempts = max(1, min(8, int(os.environ.get("WORKER_MAX_ATTEMPTS", "4"))))
         max_side = max(64, min(FIXTURE_SIDE, int(os.environ.get("WORKER_OUTPUT_MAX_SIDE", "768"))))
@@ -324,20 +463,9 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
     except ValueError as exc:
         raise GpuPipelineUnreadyError(f"Invalid worker numeric setting: {exc}") from exc
     checker_url = os.environ.get("WORKER_CHECKER_URL", "").strip() or DEFAULT_CHECKER_URL
-    run_root = os.environ.get("WORKER_RUN_DIR", "").strip()
+    run_root = os.environ.get("WORKER_RUN_DIR", "").strip() if retain else ""
 
     try:
-        image = Image.open(input_path).convert("RGB")
-        mask = np.asarray(Image.open(mask_path).convert("L")) > 127
-        expected = (FIXTURE_SIDE, FIXTURE_SIDE)
-        if image.size != expected or mask.shape != expected:
-            raise GpuPipelineUnreadyError(
-                f"Fixtures must be {FIXTURE_SIDE}x{FIXTURE_SIDE}: {input_path.name} is {image.size}, "
-                f"{mask_path.name} is {mask.shape[::-1]}."
-            )
-        if not mask.any():
-            raise GpuPipelineUnreadyError(f"Mask has no editable pixels: {mask_path}")
-
         with _GPU_LOCK, tempfile.TemporaryDirectory(prefix="meal-worker-") as tmp:
             if run_root:  # keep every attempt and a run record; otherwise nothing is retained
                 out_dir = Path(run_root) / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.urandom(3).hex()}"
@@ -347,10 +475,10 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
             editor = get_editor(research)  # model load (if not warmed) is outside the time budget
             runner = loop.Runner(editor, loop.CheckerClient(url=checker_url), out_dir, prompt_set=PROMPT_SET)
             job = {
-                "key": loop.job_key(dish_id, task),
+                "key": loop.job_key(job_name, task),
                 "image": image,
                 "mask": mask,
-                "original_path": str(input_path.resolve()),
+                "original_path": str(original_path.resolve()),
                 "task": task,
                 "source": source,
             }
@@ -386,12 +514,10 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
 
             if run_root:
                 record = {
-                    "dish_id": dish_id,
-                    "change_id": change_ids[0],
+                    **provenance,
+                    "change_id": change_id,
                     "task": task,
                     "source": source,
-                    "input": {"path": str(input_path), "sha256": _sha256_file(input_path)},
-                    "mask": {"path": str(mask_path), "sha256": _sha256_file(mask_path)},
                     "sgedit_root": str(research.root),
                     "policy_version": policy_version,
                     "prompt_set": PROMPT_SET,
@@ -434,18 +560,18 @@ def run_builtin_pipeline(dish_id: str, change_ids: list[str]) -> dict[str, objec
                 "Preview PNG exceeds the gateway response limit; lower WORKER_OUTPUT_MAX_SIDE."
             )
         sys.stderr.write(
-            f"[gpu-worker] {dish_id}/{task}: attempts={len(tried)} selected={selected['tag']} "
+            f"[gpu-worker] {job_name}/{task}: attempts={len(tried)} selected={selected['tag']} "
             f"checker_passed={bool(selected['pass'])} stopped_for_time={out_of_time}\n"
         )
         return {
             "provider": "tailscale-gpu-worker",
-            "model": f"brushnet-sdxl+{checker_model}",
+            "model": f"brushnet-sdxl+{public_model_name(checker_model)}",
             "prompt_id": prompt_id,
             "seed": int(sel_spec.seed),
             "attempts": len(tried),
             "checker_passed": bool(selected["pass"]),
             "image_data_url": image_data_url,
-            "generated_label": GENERATED_DISCLOSURE,
+            "generated_label": generated_label,
         }
     except GpuPipelineUnreadyError:
         raise
@@ -491,12 +617,65 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "worker_mode": self.mode,
                     "gpu_ready": self.mode == "gpu" and is_gpu_pipeline_ready(),
+                    "photo_ready": self.mode == "gpu" and is_photo_pipeline_ready(),
                 },
             )
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
+    def _handle_photo(self) -> None:
+        """Edit an uploaded photo inside its painted mask. Never fakes an output."""
+        if not self._check_auth():
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_length"})
+            return
+        if length <= 0 or length > MAX_PHOTO_BODY_BYTES:
+            self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body_size"})
+            return
+        try:
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": "invalid_json"})
+            return
+        if not isinstance(data, dict) or set(data) - {"schema_version", "change_id", "image_png_base64", "mask_png_base64"}:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_photo_request"})
+            return
+        if self.mode != "gpu" or os.environ.get("WORKER_GPU_CMD", "").strip():
+            # Dry-run has no model, and the external command only knows catalog fixtures.
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "gpu_pipeline_unready", "message": "Photo edits need the built-in GPU pipeline."},
+            )
+            return
+        try:
+            artifact = run_photo_pipeline(
+                data.get("change_id"), data.get("image_png_base64"), data.get("mask_png_base64")
+            )
+        except PhotoRequestError as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_photo", "message": str(exc)})
+            return
+        except GpuRequestUnsupportedError as exc:
+            self._send_json(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                {"error": "unsupported_by_validated_model", "message": str(exc)},
+            )
+            return
+        except GpuPipelineUnreadyError as exc:
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "gpu_pipeline_unready", "message": str(exc)},
+            )
+            return
+        self._send_json(HTTPStatus.OK, artifact)
+
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/v1/generate-photo":
+            self._handle_photo()
+            return
         if self.path != "/v1/generate":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return

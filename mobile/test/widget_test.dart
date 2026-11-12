@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -9,6 +11,21 @@ import 'package:senior_meal_preview/models.dart';
 import 'package:senior_meal_preview/widgets.dart';
 
 import 'fixtures.dart';
+
+const tinyPngB64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+/// A real 400×300 PNG, as a phone camera might hand back (landscape).
+Future<Uint8List> fakeCameraPng() async {
+  final recorder = ui.PictureRecorder();
+  ui.Canvas(recorder).drawRect(
+    const ui.Rect.fromLTWH(0, 0, 400, 300),
+    ui.Paint()..color = const ui.Color(0xFFE8DCC0),
+  );
+  final image = await recorder.endRecording().toImage(400, 300);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
+}
 
 class FakeApi implements MealApi {
   bool failCatalog = false;
@@ -22,6 +39,43 @@ class FakeApi implements MealApi {
   String? sentRenderMode;
   Completer<MealPreview>? pending;
   Completer<Catalog>? pendingCatalog;
+  bool photoUpload = true;
+  String? photoError;
+  String? sentPhotoChange;
+  Uint8List? sentPhoto;
+  Uint8List? sentMask;
+
+  @override
+  Future<PhotoEditResult> editPhoto({
+    required String changeId,
+    required Uint8List imagePng,
+    required Uint8List maskPng,
+  }) async {
+    sentPhotoChange = changeId;
+    sentPhoto = imagePng;
+    sentMask = maskPng;
+    if (photoError != null) throw ApiException(photoError!);
+    return PhotoEditResult.fromJson({
+      'schema_version': 1,
+      'edit_target': {
+        'id': changeId,
+        'label': 'Brown rice',
+        'description': 'White rice swapped for brown rice',
+      },
+      'notices': ['Your photo is deleted after the edit and is not saved.'],
+      'gpu_artifact': {
+        'provider': 'tailscale-gpu-worker',
+        'model': 'brushnet-sdxl+qwen',
+        'prompt_id': 'sgedit-v1:tuned:T2/rice:ladder0:g7.5',
+        'seed': 1,
+        'attempts': 2,
+        'checker_passed': true,
+        'image_data_url': 'data:image/png;base64,$tinyPngB64',
+        'generated_label':
+            'Experimental AI edit of your photo, not reviewed by a person',
+      },
+    });
+  }
 
   @override
   Future<Catalog> fetchCatalog() async {
@@ -29,6 +83,16 @@ class FakeApi implements MealApi {
     if (pendingCatalog != null) return pendingCatalog!.future;
     if (failCatalog) {
       throw const ApiException('Cannot reach the local service.');
+    }
+    if (photoUpload) {
+      return Catalog.fromJson({
+        ...catalogJson,
+        'capabilities': {
+          'symbolic_preview': true,
+          'gpu_preview': gpuPreviewEnabled,
+          'photo_upload': true,
+        },
+      });
     }
     if (gpuPreviewEnabled) {
       return Catalog.fromJson({

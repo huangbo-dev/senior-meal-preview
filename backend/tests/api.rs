@@ -772,3 +772,206 @@ async fn readiness_timeout_and_unreachable_worker_fail_closed() {
     drop(listener);
     assert!(!gpu_preview_ready(&cfg).await);
 }
+
+/// A large, valid-looking base64 PNG (beyond the 16 KiB JSON limit of other routes).
+fn photo_b64(len: usize) -> String {
+    let mut s = String::from("iVBORw0KGgo");
+    while s.len() < len {
+        s.push('A');
+    }
+    while s.len() % 4 != 0 {
+        s.push('A');
+    }
+    s
+}
+
+async fn post_photo(app: axum::Router, body: Value) -> (StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/photo-preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// One-shot mock worker: reads a full HTTP request (headers + Content-Length body), answers
+/// with `status` and `body`, and hands back the request text.
+async fn mock_worker(status: &'static str, body: String) -> (u16, tokio::task::JoinHandle<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            let n = socket.read(&mut chunk).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buf[..end]).to_string();
+                let len: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("Content-Length: "))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                if buf.len() >= end + 4 + len {
+                    break;
+                }
+            }
+        }
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+        String::from_utf8_lossy(&buf).to_string()
+    });
+    (port, task)
+}
+
+fn photo_app(port: Option<u16>) -> axum::Router {
+    use senior_meal_preview::{RuntimeConfig, worker::GpuWorkerConfig};
+    senior_meal_preview::app_with_config(RuntimeConfig {
+        gpu_worker: port.map(|p| {
+            GpuWorkerConfig::new(
+                &format!("http://127.0.0.1:{p}"),
+                None,
+                std::time::Duration::from_secs(5),
+                1,
+            )
+            .unwrap()
+        }),
+        ..RuntimeConfig::default()
+    })
+}
+
+#[tokio::test]
+async fn photo_preview_forwards_a_large_upload_to_the_worker_photo_route() {
+    let artifact = json!({
+        "provider": "tailscale-gpu-worker",
+        "model": "brushnet-sdxl+qwen",
+        "prompt_id": "sgedit-v1:tuned:T2/rice:ladder0:g7.5",
+        "seed": 7,
+        "attempts": 1,
+        "checker_passed": true,
+        "image_data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "generated_label": "Experimental AI edit of your photo, not reviewed by a person"
+    });
+    let (port, task) = mock_worker("200 OK", artifact.to_string()).await;
+    let image = photo_b64(2 * 1024 * 1024);
+    let (status, value) = post_photo(
+        photo_app(Some(port)),
+        json!({"change_id": "brown_rice", "image_png_base64": image, "mask_png_base64": photo_b64(4096)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["edit_target"]["id"], "brown_rice");
+    assert_eq!(value["gpu_artifact"]["attempts"], 1);
+    assert!(value["notices"].to_string().contains("not saved"));
+    let sent = task.await.unwrap();
+    assert!(sent.starts_with("POST /v1/generate-photo HTTP/1.1"));
+    assert!(sent.contains("\"change_id\":\"brown_rice\""));
+    assert!(sent.contains(&image));
+}
+
+#[tokio::test]
+async fn photo_preview_validates_before_contacting_the_worker() {
+    let ok = || json!({"change_id": "extra_vegetables", "image_png_base64": photo_b64(64), "mask_png_base64": photo_b64(64)});
+    let mut unknown = ok();
+    unknown["photo_url"] = json!("http://example.com/a.png");
+    let mut sauce = ok();
+    sauce["change_id"] = json!("sauce_on_side");
+    let mut jpeg = ok();
+    jpeg["image_png_base64"] = json!("/9j/4AAQSkZJRgABAQ==");
+    let mut junk = ok();
+    junk["mask_png_base64"] = json!("iVBORw0KGgo<script>");
+    for (body, expected, code) in [
+        (unknown, StatusCode::UNPROCESSABLE_ENTITY, "invalid_json"),
+        (sauce, StatusCode::BAD_REQUEST, "unsupported_change"),
+        (jpeg, StatusCode::BAD_REQUEST, "photo_invalid"),
+        (junk, StatusCode::BAD_REQUEST, "photo_invalid"),
+        (ok(), StatusCode::SERVICE_UNAVAILABLE, "gpu_unavailable"),
+    ] {
+        let (status, value) = post_photo(photo_app(None), body).await;
+        assert_eq!(
+            (status, value["error"]["code"].as_str()),
+            (expected, Some(code))
+        );
+    }
+    let huge = json!({"change_id": "brown_rice", "image_png_base64": photo_b64(9 * 1024 * 1024), "mask_png_base64": photo_b64(64)});
+    let (status, _) = post_photo(photo_app(None), huge).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    // Other routes keep their 16 KiB limit.
+    let mut big_preview = request();
+    big_preview["padding"] = json!(photo_b64(32 * 1024));
+    assert_eq!(
+        call(Method::POST, "/api/v1/preview", big_preview).await.0,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+}
+
+#[tokio::test]
+async fn photo_preview_reports_worker_photo_rejection_without_details() {
+    let (port, task) = mock_worker(
+        "400 Bad Request",
+        r#"{"error":"invalid_photo","message":"internal detail"}"#.into(),
+    )
+    .await;
+    let (status, value) = post_photo(
+        photo_app(Some(port)),
+        json!({"change_id": "brown_rice", "image_png_base64": photo_b64(64), "mask_png_base64": photo_b64(64)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(value["error"]["code"], "photo_invalid");
+    assert!(!value.to_string().contains("internal detail"));
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn catalog_advertises_photo_upload_separately_from_dish_previews() {
+    for (health, gpu, photo) in [
+        (
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":false,"photo_ready":true}"#,
+            false,
+            true,
+        ),
+        (
+            r#"{"status":"ok","worker_mode":"dry-run","gpu_ready":false,"photo_ready":true}"#,
+            false,
+            false,
+        ),
+        (
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":true}"#,
+            true,
+            false,
+        ),
+    ] {
+        let (port, task) = mock_worker("200 OK", health.into()).await;
+        let response = photo_app(Some(port))
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/catalog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["capabilities"]["gpu_preview"], gpu, "{health}");
+        assert_eq!(value["capabilities"]["photo_upload"], photo, "{health}");
+        assert!(task.await.unwrap().starts_with("GET /healthz"));
+    }
+}

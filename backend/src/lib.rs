@@ -22,7 +22,10 @@ use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     timeout::TimeoutLayer,
 };
-use worker::{GpuArtifact, GpuWorkerConfig, WorkerFailure, WorkerGenerateRequest, WorkerTransport};
+use worker::{
+    GpuArtifact, GpuWorkerConfig, WorkerFailure, WorkerGenerateRequest, WorkerPhotoRequest,
+    WorkerTransport,
+};
 
 pub const MODE: &str = "illustrative_only";
 pub const NOTICE: &str = "Not nutrition, allergen or medical advice.";
@@ -150,6 +153,9 @@ pub struct Selection {
 pub struct Capabilities {
     pub symbolic_preview: bool,
     pub gpu_preview: bool,
+    /// `POST /api/v1/photo-preview` can edit a user-taken photo (same readiness probe as
+    /// `gpu_preview`). Additive to schema v1.
+    pub photo_upload: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -227,6 +233,7 @@ fn build_catalog() -> Catalog {
         capabilities: Capabilities {
             symbolic_preview: true,
             gpu_preview: false,
+            photo_upload: false,
         },
         notice: NOTICE,
     }
@@ -392,6 +399,47 @@ pub fn make_preview(request: PreviewRequest) -> Result<Preview, ApiError> {
     })
 }
 
+/// Plain-language API error for a GPU worker failure. Never substitutes a mock image.
+fn worker_error(failure: WorkerFailure) -> ApiError {
+    match failure {
+        WorkerFailure::Busy => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "gpu_busy",
+            "The GPU model worker is busy with another request. Please try again or use symbolic illustration.",
+        ),
+        WorkerFailure::Timeout => ApiError::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            "gpu_timeout",
+            "The Tailscale GPU model worker timed out. Check the GPU node or use symbolic illustration.",
+        ),
+        WorkerFailure::Unsupported => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "gpu_unsupported_request",
+            "The AI preview currently handles one change at a time: brown rice or added vegetables on a rice meal. Choose one of those, or use symbolic illustration.",
+        ),
+        WorkerFailure::NotReady => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "gpu_not_ready",
+            "The GPU model worker is running but its models or meal photos are not ready. No mock image was substituted. Use symbolic illustration for now.",
+        ),
+        WorkerFailure::Unreachable(_) => ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "gpu_unreachable",
+            "Cannot reach the GPU model worker over Tailscale. Verify tailscaled and the worker service.",
+        ),
+        WorkerFailure::InvalidResponse(_) => ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "gpu_invalid_response",
+            "The GPU model worker returned an invalid response. No mock image was substituted.",
+        ),
+        WorkerFailure::BadPhoto => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "photo_invalid",
+            "The photo or the painted area could not be used. Paint over the rice only, then try again.",
+        ),
+    }
+}
+
 async fn preview(
     State(config): State<Arc<RuntimeConfig>>,
     body: Result<Json<PreviewRequest>, JsonRejection>,
@@ -437,38 +485,7 @@ async fn preview(
         };
         let artifact = worker::request_gpu_preview(worker_cfg, &worker_req)
             .await
-            .map_err(|failure| match failure {
-                WorkerFailure::Busy => ApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "gpu_busy",
-                    "The GPU model worker is busy with another request. Please try again or use symbolic illustration.",
-                ),
-                WorkerFailure::Timeout => ApiError::new(
-                    StatusCode::GATEWAY_TIMEOUT,
-                    "gpu_timeout",
-                    "The Tailscale GPU model worker timed out. Check the GPU node or use symbolic illustration.",
-                ),
-                WorkerFailure::Unsupported => ApiError::new(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "gpu_unsupported_request",
-                    "The AI preview currently handles one change at a time: brown rice or added vegetables on a rice meal. Choose one of those, or use symbolic illustration.",
-                ),
-                WorkerFailure::NotReady => ApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "gpu_not_ready",
-                    "The GPU model worker is running but its models or meal photos are not ready. No mock image was substituted. Use symbolic illustration for now.",
-                ),
-                WorkerFailure::Unreachable(_) => ApiError::new(
-                    StatusCode::BAD_GATEWAY,
-                    "gpu_unreachable",
-                    "Cannot reach the GPU model worker over Tailscale. Verify tailscaled and the worker service.",
-                ),
-                WorkerFailure::InvalidResponse(_) => ApiError::new(
-                    StatusCode::BAD_GATEWAY,
-                    "gpu_invalid_response",
-                    "The GPU model worker returned an invalid response. No mock image was substituted.",
-                ),
-            })?;
+            .map_err(worker_error)?;
         // Replace the no-AI-model notice with the truthful GPU-worker provenance notice.
         result.notices[1] =
             "AI-generated from a stock meal photo, not a real meal. Your choices are not saved.";
@@ -546,6 +563,114 @@ async fn require_api_token(
     Ok(next.run(request).await)
 }
 
+/// Largest request body accepted by `POST /api/v1/photo-preview` (two base64 PNGs).
+pub const MAX_PHOTO_BODY_BYTES: usize = 8 * 1024 * 1024;
+/// Largest single base64 image in a photo request.
+const MAX_PHOTO_B64_CHARS: usize = 6 * 1024 * 1024;
+/// Base64 of the 8-byte PNG signature.
+const PNG_B64_PREFIX: &str = "iVBORw0KGgo";
+/// Changes the model was evaluated on, the only ones offered for a user photo.
+pub const PHOTO_CHANGE_IDS: [&str; 2] = ["brown_rice", "extra_vegetables"];
+
+/// A user-taken photo plus the painted area to change. Unknown fields are rejected.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhotoPreviewRequest {
+    pub change_id: String,
+    pub image_png_base64: String,
+    pub mask_png_base64: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PhotoPreview {
+    schema_version: u8,
+    edit_target: EditTarget,
+    notices: Vec<&'static str>,
+    pub gpu_artifact: GpuArtifact,
+}
+
+fn looks_like_png_base64(value: &str) -> bool {
+    value.len() <= MAX_PHOTO_B64_CHARS
+        && value.len() % 4 == 0
+        && value.starts_with(PNG_B64_PREFIX)
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+}
+
+async fn photo_preview(
+    State(config): State<Arc<RuntimeConfig>>,
+    body: Result<Json<PhotoPreviewRequest>, JsonRejection>,
+) -> Result<Json<PhotoPreview>, ApiError> {
+    let Json(request) = body.map_err(|error| match error.status() {
+        StatusCode::PAYLOAD_TOO_LARGE => ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body_too_large",
+            "The photo is too large.",
+        ),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "content_type",
+            "Send an application/json request.",
+        ),
+        _ => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_json",
+            "The request does not match the photo-preview format.",
+        ),
+    })?;
+    if !PHOTO_CHANGE_IDS.contains(&request.change_id.as_str()) {
+        return Err(ApiError::invalid(
+            "unsupported_change",
+            "For your own photo, choose brown rice or added vegetables.",
+        ));
+    }
+    if !looks_like_png_base64(&request.image_png_base64)
+        || !looks_like_png_base64(&request.mask_png_base64)
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "photo_invalid",
+            "The photo or the painted area could not be used. Paint over the rice only, then try again.",
+        ));
+    }
+    let change = CATALOG
+        .changes
+        .iter()
+        .find(|c| c.id == request.change_id)
+        .expect("photo change ids are catalog changes");
+    let Some(ref worker_cfg) = config.gpu_worker else {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "gpu_unavailable",
+            "Photo editing is not switched on for this server right now.",
+        ));
+    };
+    let payload = WorkerPhotoRequest {
+        schema_version: 1,
+        change_id: request.change_id,
+        image_png_base64: request.image_png_base64,
+        mask_png_base64: request.mask_png_base64,
+    };
+    let artifact = worker::request_gpu_photo_edit(worker_cfg, &payload)
+        .await
+        .map_err(worker_error)?;
+    Ok(Json(PhotoPreview {
+        schema_version: 1,
+        edit_target: EditTarget {
+            id: change.id,
+            label: change.label,
+            description: change.description,
+        },
+        notices: vec![
+            "Experimental AI edit of your photo. No person has checked it.",
+            "Your photo is deleted after the edit and is not saved.",
+            NOTICE,
+        ],
+        gpu_artifact: artifact,
+    }))
+}
+
 pub fn app() -> Router {
     app_with_config(RuntimeConfig::default())
 }
@@ -581,14 +706,20 @@ pub fn app_with_config(config: RuntimeConfig) -> Router {
         .route(
             "/api/v1/catalog",
             get(|State(cfg): State<Arc<RuntimeConfig>>| async move {
-                let gpu_ready = match cfg.gpu_worker.as_ref() {
-                    Some(worker) => worker::gpu_preview_ready(worker).await,
-                    None => false,
+                let ready = match cfg.gpu_worker.as_ref() {
+                    Some(worker) => worker::worker_readiness(worker).await,
+                    None => worker::WorkerReadiness::default(),
                 };
-                Json(catalog_for(gpu_ready))
+                let mut catalog = catalog_for(ready.gpu_preview);
+                catalog.capabilities.photo_upload = ready.photo_upload;
+                Json(catalog)
             }),
         )
         .route("/api/v1/preview", post(preview))
+        .route(
+            "/api/v1/photo-preview",
+            post(photo_preview).layer(DefaultBodyLimit::max(MAX_PHOTO_BODY_BYTES)),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&shared),
             require_api_token,

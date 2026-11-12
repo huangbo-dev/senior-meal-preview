@@ -100,6 +100,7 @@ class CatalogCapabilities {
   const CatalogCapabilities({
     this.symbolicPreview = true,
     this.gpuPreview = false,
+    this.photoUpload = false,
   });
 
   /// Whether deterministic symbolic plate illustrations are available.
@@ -108,11 +109,17 @@ class CatalogCapabilities {
   /// Whether the private Tailscale GPU model worker is configured.
   final bool gpuPreview;
 
+  /// Whether `POST /api/v1/photo-preview` can edit a photo the user takes.
+  final bool photoUpload;
+
   /// Decodes [CatalogCapabilities] from the optional `capabilities` JSON map.
   factory CatalogCapabilities.fromJson(Object? json) => switch (json) {
     null => const CatalogCapabilities(),
     {'symbolic_preview': true, 'gpu_preview': final bool gpu} =>
-      CatalogCapabilities(gpuPreview: gpu),
+      CatalogCapabilities(
+        gpuPreview: gpu,
+        photoUpload: (json as Map)['photo_upload'] == true,
+      ),
     _ => throw const FormatException('Symbolic preview must remain enabled.'),
   };
 }
@@ -361,5 +368,61 @@ class MealPreview {
 void _requireIllustrativeSchema(Map<String, dynamic> json) {
   if (json['schema_version'] != 1 || json['mode'] != 'illustrative_only') {
     throw const FormatException('Unsupported response.');
+  }
+}
+
+/// A change the model can make to a user's own photo (research tasks only).
+class PhotoChange {
+  const PhotoChange(this.id, this.label, this.paintHint);
+
+  /// Catalog change identifier sent to the API.
+  final String id;
+
+  /// Short label shown on the choice.
+  final String label;
+
+  /// What the user should paint over.
+  final String paintHint;
+
+  static const all = [
+    PhotoChange(
+      'brown_rice',
+      'Swap white rice for brown rice',
+      'Paint over the white rice.',
+    ),
+    PhotoChange(
+      'extra_vegetables',
+      'Add some broccoli',
+      'Paint over the rice where the broccoli should go.',
+    ),
+  ];
+}
+
+/// Validated response from `POST /api/v1/photo-preview`.
+class PhotoEditResult {
+  const PhotoEditResult({
+    required this.editTarget,
+    required this.notices,
+    required this.artifact,
+  });
+
+  final EditTarget editTarget;
+  final List<String> notices;
+  final GpuArtifact artifact;
+
+  factory PhotoEditResult.fromJson(Map<String, dynamic> json) {
+    if (json case {
+      'schema_version': 1,
+      'edit_target': final Map<String, dynamic> target,
+      'notices': final List<dynamic> notices,
+      'gpu_artifact': final Map<String, dynamic> artifact,
+    }) {
+      return PhotoEditResult(
+        editTarget: EditTarget.fromJson(target),
+        notices: notices.cast<String>(),
+        artifact: GpuArtifact.fromJson(artifact),
+      );
+    }
+    throw const FormatException('Invalid photo edit response.');
   }
 }

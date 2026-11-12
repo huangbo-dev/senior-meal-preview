@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'models.dart';
+import 'photo_flow.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -468,7 +469,26 @@ class _MealFlowState extends State<MealFlow> {
       style: Theme.of(context).textTheme.bodyMedium,
     ),
     StepProgress(step: _step, labels: _steps),
-    const SizedBox(height: 24),
+    const SizedBox(height: 16),
+    OutlinedButton.icon(
+      key: const Key('open-photo-edit'),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(52),
+        foregroundColor: AppColors.ink,
+        side: const BorderSide(color: AppColors.strongOutline),
+      ),
+      icon: const Icon(Icons.photo_camera_outlined),
+      label: const Text('Use my own meal photo'),
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PhotoEditPage(
+            api: _api,
+            available: _catalog!.capabilities.photoUpload,
+          ),
+        ),
+      ),
+    ),
+    const SizedBox(height: 20),
     for (final dish in _catalog!.dishes)
       Padding(
         padding: const EdgeInsets.only(bottom: 14),
