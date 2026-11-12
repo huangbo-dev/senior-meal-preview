@@ -1,16 +1,18 @@
-# SG Food Edit — Android debug APKs (0.1.0)
+# SG Food Edit — Android debug APKs (0.2.0)
 
-Built on 2026-11-12 from source commit `474f465` with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-12 from source commit `34731cb` with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 
 | File | For |
 | --- | --- |
-| `sg-food-edit-0.1.0-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
-| `sg-food-edit-0.1.0-debug-x86_64.apk` | x86_64 emulators |
+| `sg-food-edit-0.2.0-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
+| `sg-food-edit-0.2.0-debug-x86_64.apk` | x86_64 emulators |
 
 Checksums are in `SHA256SUMS`.
 
 ## What's in this build
+
+Version **0.2.0** (Android versionCode 2002; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
 
 - **Use my own meal photo** (on the Meals screen): take or choose a photo of a rice meal, pick
   "brown rice" or "add broccoli", paint over the rice, and get the edited photo back beside the
