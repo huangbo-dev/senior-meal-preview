@@ -1,6 +1,6 @@
 # A little change — Android debug APKs (0.1.0)
 
-Built on 2026-11-11 from source commit `cf2a9c2` with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-12 from source commit `cf2a9c2` with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 
 | File | For |
@@ -9,6 +9,14 @@ Built on 2026-11-11 from source commit `cf2a9c2` with Flutter 3.44.8 / Dart 3.12
 | `a-little-change-0.1.0-debug-x86_64.apk` | x86_64 emulators |
 
 Checksums are in `SHA256SUMS`.
+
+## What's in this build
+
+- New app icon: a plate with one small leaf.
+- The three meal reference photos (Wikimedia Commons, see the in-app credits) are now bundled.
+  Before this, every meal card read "Photo unavailable".
+- If the meal list doesn't load, the home screen offers **Try again** after 8 seconds and shows an error after 15,
+  instead of staying on "Getting the meal choices…".
 
 ## Backend this build talks to
 
