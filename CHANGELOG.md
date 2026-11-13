@@ -3,6 +3,25 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.3.2 — 2026-11-13
+
+- **Bottom tab bar** on every screen: Meals · My photo · About. A screen's main action is pinned
+  just above it (Generate/Review, Edit choices, Make the change, Try another photo); at large text
+  sizes or on short screens it moves back into the page so nothing is covered. Tapping Meals again
+  returns to the meal list; switching tabs keeps a half-painted photo. About is now a tab.
+- Fix (web): choosing or taking a photo always failed with "Could not open that photo" because the
+  page's Content-Security-Policy blocked reading the picked file (`blob:` URL).
+- Fix: on the own-photo screen, errors told people to "choose Summary only", which only exists in
+  the meal flow. GPU error messages no longer mention Tailscale, GPU nodes or "symbolic illustration".
+- Fix: a recoloured brown-rice photo was labelled "Not AI-generated" while the notice beside it said
+  "Experimental AI edit". The notice now reads "Experimental edit of your photo".
+- The gateway timeout must cover the worker's retry budget: `backend.env.example` now says so. With
+  the old 25 s value, broccoli edits needing retries (~30 s) were reported as timeouts although the
+  worker finished. Spark02's gateway already uses 85 s.
+- `scripts/check.sh` fails if the three reference photos are missing (`*.jpg` is git-ignored, which
+  is how 0.3.0 shipped without them). Worker tests no longer crash their test server on Windows;
+  `scripts/smoke.py` honours `CARGO_TARGET_DIR` and runs on Windows.
+
 ## 0.3.1 — 2026-11-13
 
 - Fix: the 0.3.0 APK was built without the three meal reference photos, so every meal card read

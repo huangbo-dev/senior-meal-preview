@@ -1,19 +1,25 @@
-# SG Food Edit — Android debug APKs (0.3.1)
+# SG Food Edit — Android debug APKs (0.3.2)
 
-Built on 2026-11-13 from source commit `219a725` with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-13 from source commit `cd9cd22` (`main` and `production`) with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
+Spark02 is aarch64 and Gradle's aapt2 is x86_64, so the build also passes
+`--android-project-arg=android.aapt2FromMavenOverride=$HOME/toolchains/qemu/aapt2` (runs it under QEMU).
 
 | File | For |
 | --- | --- |
-| `sg-food-edit-0.3.1-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
-| `sg-food-edit-0.3.1-debug-x86_64.apk` | x86_64 emulators |
+| `sg-food-edit-0.3.2-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
+| `sg-food-edit-0.3.2-debug-x86_64.apk` | x86_64 emulators |
 
 Checksums are in `SHA256SUMS`. Earlier APKs are in this branch's history. Do not use 0.3.0: it was built without the meal photos.
 
 ## What's in this build
 
-Version **0.3.1** (Android versionCode 2004; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
+Version **0.3.2** (Android versionCode 2005 on arm64, 4005 on x86_64; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
 
+- **New in 0.3.2:** a bottom tab bar (Meals · My photo · About) with each screen's main button
+  pinned above it; About is now a tab. Plainer error messages, which no longer suggest
+  "Summary only" on the photo screen. The recoloured brown-rice result no longer carries an
+  "Experimental AI edit" notice next to its "Not AI-generated" label.
 - **Use my own meal photo** (on the Meals screen): take or choose a photo of a rice meal, pick
   "brown rice" or "add broccoli", paint the area, and get the edited photo back beside the original.
   For the project team only.
