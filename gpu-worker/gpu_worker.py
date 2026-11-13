@@ -391,7 +391,7 @@ def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> d
     when the request finishes, even when WORKER_RUN_DIR is set: user photos are never
     retained. Only the research rice tasks are supported, one change per photo.
     """
-    if change_id not in BUILTIN_TASKS:
+    if not isinstance(change_id, str) or change_id not in BUILTIN_TASKS:
         raise GpuRequestUnsupportedError(
             f"Photo edits support exactly one of {sorted(BUILTIN_TASKS)}."
         )
@@ -401,9 +401,17 @@ def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> d
     np, Image = research.np, research.Image
     try:
         image = Image.open(io.BytesIO(image_raw))
-        image.load()
         mask_img = Image.open(io.BytesIO(mask_raw))
+        # Inspect headers before decoding pixel buffers: a compact PNG can expand
+        # far beyond the upload byte limit. Apply the budget to both images.
+        if min(image.size) < 256 or max(image.size) > 4096:
+            raise PhotoRequestError("Photo must be between 256 and 4096 pixels on each side.")
+        if mask_img.size != image.size:
+            raise PhotoRequestError("Mask must be the same size as the photo.")
+        image.load()
         mask_img.load()
+    except PhotoRequestError:
+        raise
     except Exception as exc:
         raise PhotoRequestError("Photo or mask could not be decoded.") from exc
     if min(image.size) < 256 or max(image.size) > 4096:
