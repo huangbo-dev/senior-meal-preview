@@ -3,6 +3,23 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.3.0 — 2026-11-13
+
+**Own-photo edits: faster, and they keep your meal** (project team only)
+- **Brown rice** now recolours your own rice instead of generating new rice: the grains, the mound
+  and the plate stay as photographed. No AI image model is used for this change. About 3 s
+  (was about 12 s). Paint the rice only: a white plate under the brush is tinted too.
+- **Add broccoli** now takes one small painted patch and places broccoli there, leaving the rest of
+  the rice untouched. About 11 s per attempt.
+- Before this, both changes blanked the painted area and regenerated it, which often drew a new
+  bowl or plate in place of the rice.
+- The waiting screen shows a progress bar and the seconds so far. The bar is an estimate from
+  elapsed time; the server does not report progress.
+- These two methods are app-only (`WORKER_PHOTO_METHOD=app` on the worker). They were chosen by eye
+  on one public chicken rice photo, are not the CE7454 research method, and are not evaluated.
+  The automatic check was written for the research method and often marks a recoloured photo
+  "not passed".
+
 ## 0.2.0 — 2026-11-12
 
 **New: edit your own meal photo** (project team only)
