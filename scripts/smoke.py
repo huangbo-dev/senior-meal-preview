@@ -30,7 +30,8 @@ subprocess.run(
     ["cargo", "build", "--locked", "--manifest-path", str(ROOT / "backend/Cargo.toml")],
     check=True,
 )
-binary = ROOT / "backend/target/debug/senior-meal-preview"
+target_dir = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "backend/target")
+binary = target_dir / "debug" / ("senior-meal-preview.exe" if os.name == "nt" else "senior-meal-preview")
 worker_script = ROOT / "gpu-worker/gpu_worker.py"
 
 worker_process = subprocess.Popen(
@@ -77,7 +78,7 @@ try:
         raise RuntimeError("The temporary GPU worker did not start in time.")
     if shutil.which("dart"):
         subprocess.run(
-            ["dart", "run", "tool/smoke_api.dart"],
+            [shutil.which("dart"), "run", "tool/smoke_api.dart"],  # dart.bat on Windows
             cwd=ROOT / "mobile",
             env={**os.environ, "API_BASE_URL": base_url},
             check=True,

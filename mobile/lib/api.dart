@@ -97,7 +97,7 @@ class HttpMealApi implements MealApi {
         uri.hasQuery ||
         uri.hasFragment) {
       throw const ApiException(
-        'The API address is not valid. Check API_BASE_URL.',
+        'This app is set up with an invalid service address. Please tell whoever shared it with you.',
       );
     }
     return uri;

@@ -65,8 +65,8 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
 
     def test_dry_run_auth_validation_and_artifact_schema(self) -> None:
         server, base_url = self._start_server(mode="dry-run", token="tailscale-secret-token")
+        self.addCleanup(server.server_close)  # runs last: after shutdown()
         self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
 
         # 1. Healthz is open and reports dry-run mode
         with urllib.request.urlopen(f"{base_url}/healthz", timeout=3) as resp:
@@ -146,8 +146,8 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
 
     def test_dry_run_never_checks_or_advertises_real_gpu_readiness(self) -> None:
         server, base_url = self._start_server(mode="dry-run", token=None)
+        self.addCleanup(server.server_close)  # runs last: after shutdown()
         self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
         with mock.patch.object(gpu_worker, "is_gpu_pipeline_ready", return_value=True) as ready:
             with urllib.request.urlopen(f"{base_url}/healthz", timeout=3) as resp:
                 self.assertFalse(json.loads(resp.read())["gpu_ready"])
@@ -155,8 +155,8 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
 
     def test_gpu_health_reports_configured_readiness(self) -> None:
         server, base_url = self._start_server(mode="gpu", token=None)
+        self.addCleanup(server.server_close)  # runs last: after shutdown()
         self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
         for configured in (False, True):
             with mock.patch.object(gpu_worker, "is_gpu_pipeline_ready", return_value=configured):
                 with urllib.request.urlopen(f"{base_url}/healthz", timeout=3) as resp:
@@ -164,8 +164,8 @@ class TailscaleGpuWorkerTests(unittest.TestCase):
 
     def test_gpu_mode_fails_closed_when_unconfigured_and_runs_cmd_when_configured(self) -> None:
         server, base_url = self._start_server(mode="gpu", token="gpu-token")
+        self.addCleanup(server.server_close)  # runs last: after shutdown()
         self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
 
         payload = json.dumps(
             {

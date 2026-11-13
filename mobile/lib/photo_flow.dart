@@ -133,9 +133,13 @@ class PhotoEditPage extends StatefulWidget {
     required this.api,
     required this.available,
     this.picker = pickWithImagePicker,
+    this.onBackToMeals,
   });
 
   final MealApi api;
+
+  /// Called by "Back to meals" when the page is a tab; a pushed page pops.
+  final VoidCallback? onBackToMeals;
 
   /// Whether the server advertised `photo_upload` (a real model is connected).
   final bool available;
@@ -276,6 +280,9 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         backgroundColor: AppColors.background,
         title: const Text('Your own photo'),
       ),
+      bottomNavigationBar: _pinnedAction() == null
+          ? null
+          : PinnedActionBar(child: _pinnedAction()!),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -296,6 +303,28 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       ),
     ),
   );
+
+  Widget _submitButton() => AppPrimaryButton(
+    key: const Key('photo-submit'),
+    label: _strokes.isEmpty ? 'Paint the rice first' : 'Make the change',
+    onPressed: _strokes.isEmpty ? null : _submit,
+  );
+
+  Widget _againButton() => AppPrimaryButton(
+    key: const Key('photo-again'),
+    label: 'Try another photo',
+    onPressed: _startOver,
+  );
+
+  /// The stage's main action, pinned at the bottom on roomy screens.
+  Widget? _pinnedAction() {
+    if (!pinPrimaryAction(context)) return null;
+    return switch (_stage) {
+      _Stage.paint => _submitButton(),
+      _Stage.result => _againButton(),
+      _Stage.choose || _Stage.working => null,
+    };
+  }
 
   List<Widget> _chooseView() => [
     const StepHeading('Change your own meal photo'),
@@ -438,12 +467,10 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       NoticeCard(_error!, error: true),
       const SizedBox(height: 12),
     ],
-    AppPrimaryButton(
-      key: const Key('photo-submit'),
-      label: _strokes.isEmpty ? 'Paint the rice first' : 'Make the change',
-      onPressed: _strokes.isEmpty ? null : _submit,
-    ),
-    const SizedBox(height: 8),
+    if (!pinPrimaryAction(context)) ...[
+      _submitButton(),
+      const SizedBox(height: 8),
+    ],
     TextButton(
       onPressed: _startOver,
       child: const Text('Use a different photo'),
@@ -543,14 +570,14 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         const SizedBox(height: 8),
       ],
       const SizedBox(height: 8),
-      AppPrimaryButton(
-        key: const Key('photo-again'),
-        label: 'Try another photo',
-        onPressed: _startOver,
-      ),
-      const SizedBox(height: 8),
+      if (!pinPrimaryAction(context)) ...[
+        _againButton(),
+        const SizedBox(height: 8),
+      ],
       TextButton(
-        onPressed: () => Navigator.of(context).maybePop(),
+        key: const Key('photo-back-to-meals'),
+        onPressed:
+            widget.onBackToMeals ?? () => Navigator.of(context).maybePop(),
         child: const Text('Back to meals'),
       ),
     ];

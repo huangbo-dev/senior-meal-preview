@@ -35,8 +35,14 @@ class MealFlow extends StatefulWidget {
   State<MealFlow> createState() => _MealFlowState();
 }
 
+/// The app's bottom tabs.
+enum AppTab { meals, photo, about }
+
 class _MealFlowState extends State<MealFlow> {
   static const _steps = ['Choose a meal', 'Choose changes', 'Review request'];
+
+  AppTab _tab = AppTab.meals;
+  Future<String>? _credits;
 
   late final MealApi _api;
   late final bool _ownsApi;
@@ -185,77 +191,183 @@ class _MealFlowState extends State<MealFlow> {
     }
   }
 
-  bool get _pinAction =>
-      textScaleOf(context) <= 1.3 && MediaQuery.sizeOf(context).height >= 640;
+  bool get _pinAction => pinPrimaryAction(context);
+
+  /// Tapping the open Meals tab again returns to the meal list, as in native
+  /// tab bars; other tabs keep their state (a half-painted photo survives).
+  void _selectTab(AppTab tab) {
+    if (tab == AppTab.meals && _tab == AppTab.meals) {
+      if (_step > 0) _goTo(0);
+      return;
+    }
+    setState(() => _tab = tab);
+  }
 
   @override
   Widget build(BuildContext context) => PopScope(
-    canPop: _step == 0,
+    canPop: _tab == AppTab.meals && _step == 0,
     onPopInvokedWithResult: (didPop, result) {
-      if (!didPop && _step > 0) _goTo(_step - 1);
+      if (didPop) return;
+      if (_tab != AppTab.meals) {
+        setState(() => _tab = AppTab.meals);
+      } else if (_step > 0) {
+        _goTo(_step - 1);
+      }
     },
     child: Scaffold(
-      bottomNavigationBar:
-          !_loading && _catalog != null && _pinAction && _step > 0
-          ? SafeArea(top: false, child: _actionBar())
-          : null,
-      body: SafeArea(
-        bottom: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: AppLayout.maxOuterWidth,
-            ),
-            child: Column(
-              children: [
-                if (_step > 0) _header(),
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: _scroll,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Padding(
-                          padding: AppLayout.pagePadding,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (_loading)
-                                _loadingView()
-                              else if (_catalog == null)
-                                _catalogFailure()
-                              else ...[
-                                if (_step == 0)
-                                  ..._chooseMeal()
-                                else if (_step == 1)
-                                  ..._chooseChanges()
-                                else
-                                  ..._showPreview(),
-                                if (!_pinAction && _step > 0) ...[
-                                  const SizedBox(height: 24),
-                                  _primaryAction(),
-                                ],
-                              ],
-                              const SizedBox(height: 24),
-                              if (_step == 0)
-                                TextButton(
-                                  onPressed: _showPhotoCredits,
-                                  key: const Key('photo-credits'),
-                                  child: const Text('About'),
-                                ),
-                              SizedBox(
-                                height: MediaQuery.paddingOf(context).bottom,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_tab == AppTab.meals &&
+              !_loading &&
+              _catalog != null &&
+              _pinAction &&
+              _step > 0)
+            PinnedActionBar(child: _primaryAction()),
+          _tabBar(),
+        ],
+      ),
+      body: IndexedStack(
+        index: _tab.index,
+        children: [
+          _mealsTab(),
+          PhotoEditPage(
+            api: _api,
+            available: _catalog?.capabilities.photoUpload ?? false,
+            onBackToMeals: () => _selectTab(AppTab.meals),
           ),
+          _aboutTab(),
+        ],
+      ),
+    ),
+  );
+
+  Widget _tabBar() => DecoratedBox(
+    decoration: const BoxDecoration(
+      border: Border(top: BorderSide(color: AppColors.divider, width: .5)),
+    ),
+    child: NavigationBar(
+      key: const Key('tab-bar'),
+      selectedIndex: _tab.index,
+      onDestinationSelected: (i) => _selectTab(AppTab.values[i]),
+      backgroundColor: AppColors.surface,
+      indicatorColor: AppColors.cardSelected,
+      height: 64,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      destinations: const [
+        NavigationDestination(
+          key: Key('tab-meals'),
+          icon: Icon(Icons.restaurant_menu_outlined),
+          selectedIcon: Icon(Icons.restaurant_menu, color: AppColors.accent),
+          label: 'Meals',
+        ),
+        NavigationDestination(
+          key: Key('tab-photo'),
+          icon: Icon(Icons.photo_camera_outlined),
+          selectedIcon: Icon(Icons.photo_camera, color: AppColors.accent),
+          label: 'My photo',
+        ),
+        NavigationDestination(
+          key: Key('tab-about'),
+          icon: Icon(Icons.info_outline),
+          selectedIcon: Icon(Icons.info, color: AppColors.accent),
+          label: 'About',
+        ),
+      ],
+    ),
+  );
+
+  Widget _aboutTab() => SafeArea(
+    bottom: false,
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.maxOuterWidth),
+        child: ListView(
+          padding: AppLayout.pagePadding,
+          children: [
+            const SizedBox(height: 10),
+            const StepHeading('About'),
+            const SizedBox(height: 8),
+            Text(
+              'SG Food Edit · version $appVersion',
+              key: const Key('app-version'),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Meal photos are reference photos, not your meal. Not nutrition, allergen or medical advice.',
+            ),
+            const SizedBox(height: 20),
+            const SectionHeading('Photo credits'),
+            const SizedBox(height: 8),
+            FutureBuilder<String>(
+              // Loaded the first time the About tab is opened.
+              future: _tab == AppTab.about
+                  ? _credits ??= rootBundle.loadString(
+                      'assets/meals/ATTRIBUTION.md',
+                    )
+                  : _credits,
+              builder: (context, snapshot) => snapshot.hasData
+                  ? SelectableText(
+                      snapshot.data!.replaceAll(
+                        RegExp(r'^#+ ', multiLine: true),
+                        '',
+                      ),
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _mealsTab() => SafeArea(
+    bottom: false,
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.maxOuterWidth),
+        child: Column(
+          children: [
+            if (_step > 0) _header(),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _scroll,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: AppLayout.pagePadding,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_loading)
+                            _loadingView()
+                          else if (_catalog == null)
+                            _catalogFailure()
+                          else ...[
+                            if (_step == 0)
+                              ..._chooseMeal()
+                            else if (_step == 1)
+                              ..._chooseChanges()
+                            else
+                              ..._showPreview(),
+                            if (!_pinAction && _step > 0) ...[
+                              const SizedBox(height: 24),
+                              _primaryAction(),
+                            ],
+                          ],
+                          const SizedBox(height: 24),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     ),
@@ -328,23 +440,6 @@ class _MealFlowState extends State<MealFlow> {
     _transitionToStep();
   }
 
-  Widget _actionBar() => DecoratedBox(
-    decoration: const BoxDecoration(
-      color: AppColors.surface,
-      border: Border(top: BorderSide(color: AppColors.divider, width: .5)),
-    ),
-    child: Center(
-      heightFactor: 1,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: AppLayout.maxOuterWidth),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-          child: _primaryAction(),
-        ),
-      ),
-    ),
-  );
-
   Widget _primaryAction() => _step == 1
       ? AppPrimaryButton(
           key: const Key('submit'),
@@ -368,56 +463,6 @@ class _MealFlowState extends State<MealFlow> {
           onPressed: () => _goTo(1),
           label: 'Edit choices',
         );
-
-  Future<void> _showPhotoCredits() async {
-    final credits = await rootBundle.loadString('assets/meals/ATTRIBUTION.md');
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: false,
-      enableDrag: false,
-      isDismissible: false,
-      backgroundColor: AppColors.background,
-      builder: (sheetContext) => SizedBox(
-        height: MediaQuery.sizeOf(sheetContext).height * .75,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SectionHeading('About'),
-              const SizedBox(height: 4),
-              Text(
-                'SG Food Edit · version $appVersion',
-                key: const Key('app-version'),
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Meal photos are reference photos, not your meal. Not nutrition, allergen or medical advice.',
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    credits.replaceAll(RegExp(r'^#+ ', multiLine: true), ''),
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              AppPrimaryButton(
-                onPressed: () => Navigator.pop(sheetContext),
-                label: 'Done',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _loadingView() => Padding(
     padding: const EdgeInsets.symmetric(vertical: 80),
@@ -488,14 +533,7 @@ class _MealFlowState extends State<MealFlow> {
       ),
       icon: const Icon(Icons.photo_camera_outlined),
       label: const Text('Use my own meal photo'),
-      onPressed: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => PhotoEditPage(
-            api: _api,
-            available: _catalog!.capabilities.photoUpload,
-          ),
-        ),
-      ),
+      onPressed: () => _selectTab(AppTab.photo),
     ),
     const SizedBox(height: 20),
     for (final dish in _catalog!.dishes)

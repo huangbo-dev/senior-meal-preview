@@ -400,37 +400,38 @@ pub fn make_preview(request: PreviewRequest) -> Result<Preview, ApiError> {
 }
 
 /// Plain-language API error for a GPU worker failure. Never substitutes a mock image.
+/// Shared by the meal preview and own-photo routes, so the wording names no route-specific option.
 fn worker_error(failure: WorkerFailure) -> ApiError {
     match failure {
         WorkerFailure::Busy => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "gpu_busy",
-            "The GPU model worker is busy with another request. Please try again or use symbolic illustration.",
+            "Another picture is being made right now. Please wait a moment and try again.",
         ),
         WorkerFailure::Timeout => ApiError::new(
             StatusCode::GATEWAY_TIMEOUT,
             "gpu_timeout",
-            "The Tailscale GPU model worker timed out. Check the GPU node or use symbolic illustration.",
+            "Making the picture took too long. Please try again.",
         ),
         WorkerFailure::Unsupported => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "gpu_unsupported_request",
-            "The AI preview currently handles one change at a time: brown rice or added vegetables on a rice meal. Choose one of those, or use symbolic illustration.",
+            "AI preview handles one change at a time: brown rice or added vegetables on a rice meal. Choose one of those, or choose Summary only.",
         ),
         WorkerFailure::NotReady => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "gpu_not_ready",
-            "The GPU model worker is running but its models or meal photos are not ready. No mock image was substituted. Use symbolic illustration for now.",
+            "Picture making is not ready yet, so no picture is shown. Please try again later.",
         ),
         WorkerFailure::Unreachable(_) => ApiError::new(
             StatusCode::BAD_GATEWAY,
             "gpu_unreachable",
-            "Cannot reach the GPU model worker over Tailscale. Verify tailscaled and the worker service.",
+            "Picture making is not available right now. Please try again later.",
         ),
         WorkerFailure::InvalidResponse(_) => ApiError::new(
             StatusCode::BAD_GATEWAY,
             "gpu_invalid_response",
-            "The GPU model worker returned an invalid response. No mock image was substituted.",
+            "The picture could not be made this time, so none is shown. Please try again.",
         ),
         WorkerFailure::BadPhoto => ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -480,7 +481,7 @@ async fn preview(
             return Err(ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "gpu_unavailable",
-                "The Tailscale GPU model worker is not configured on this server. Switch to symbolic illustration or start the worker.",
+                "AI preview is not available on this server. Please choose Summary only.",
             ));
         };
         let artifact = worker::request_gpu_preview(worker_cfg, &worker_req)
@@ -491,7 +492,7 @@ async fn preview(
             "AI-generated from a stock meal photo, not a real meal. Your choices are not saved.";
         result
             .notices
-            .push("The automated check is not human or clinical verification.");
+            .push("The automatic check only helps choose a picture. No person or clinician has checked it.");
         result.gpu_artifact = Some(artifact);
     }
 
@@ -663,7 +664,7 @@ async fn photo_preview(
             description: change.description,
         },
         notices: vec![
-            "Experimental AI edit of your photo. No person has checked it.",
+            "Experimental edit of your photo. No person has checked it.",
             "Your photo is deleted after the edit and is not saved.",
             NOTICE,
         ],

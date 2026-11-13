@@ -6,6 +6,36 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 import 'theme.dart';
 
+/// Whether a screen's main action should sit in a bar pinned above the tab
+/// bar. Large text or short screens put it back inline so nothing is covered.
+bool pinPrimaryAction(BuildContext context) =>
+    textScaleOf(context) <= 1.3 && MediaQuery.sizeOf(context).height >= 640;
+
+/// The bar that holds a screen's main action, pinned at the bottom like a
+/// native app's action bar.
+class PinnedActionBar extends StatelessWidget {
+  const PinnedActionBar({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(
+      color: AppColors.surface,
+      border: Border(top: BorderSide(color: AppColors.divider, width: .5)),
+    ),
+    child: Center(
+      heightFactor: 1,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppLayout.maxOuterWidth),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+          child: child,
+        ),
+      ),
+    ),
+  );
+}
+
 /// Plain-language information or error box. Errors are live regions so they are
 /// announced once when they appear.
 class NoticeCard extends StatelessWidget {
@@ -758,7 +788,8 @@ class GpuPreviewCard extends StatelessWidget {
           Text(
             'Model: ${artifact.model} · Prompt: ${artifact.promptId} · '
             'Attempts: ${artifact.attempts} · '
-            'Selector diagnostic: ${artifact.checkerPassed ? "passed" : "unverified"}',
+            'Automatic check: ${artifact.checkerPassed ? "passed" : "not passed"} '
+            '(not a human review)',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         ],

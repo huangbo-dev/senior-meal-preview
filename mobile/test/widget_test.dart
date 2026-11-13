@@ -207,28 +207,31 @@ void main() {
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
       await tester.pumpAndSettle();
-      expect(
-        tester.widget<Scaffold>(find.byType(Scaffold)).bottomNavigationBar,
-        isNull,
-      );
+      // The tab bar stays; at large text the main action is never pinned.
+      expect(find.byKey(const Key('tab-bar')), findsOneWidget);
+      expect(find.byType(PinnedActionBar), findsNothing);
       await tapKey(tester, 'dish-chicken_rice');
       if (find.byKey(const Key('dish-chicken_rice')).evaluate().isNotEmpty) {
         await selectMeal(tester);
       }
+      expect(find.byType(PinnedActionBar), findsNothing);
+      expect(find.byKey(const Key('submit')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('licensed reference-photo credits open and dismiss', (
+  testWidgets('About tab shows the version and licensed photo credits', (
     tester,
   ) async {
     await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
     await tester.pumpAndSettle();
-    await tapKey(tester, 'photo-credits');
+    expect(find.byType(SelectableText), findsNothing);
+    await tapKey(tester, 'tab-about');
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-version')), findsOneWidget);
     expect(find.byType(SelectableText), findsOneWidget);
     final text = tester
         .widget<SelectableText>(find.byType(SelectableText))
@@ -236,9 +239,32 @@ void main() {
     expect(text, contains('Misaochan'));
     expect(text, contains('PaulMondal'));
     expect(text, contains('https://creativecommons.org/licenses/'));
-    await tester.tap(find.text('Done'));
+    await tapKey(tester, 'tab-meals');
+    expect(find.byKey(const Key('dish-chicken_rice')), findsOneWidget);
+  });
+
+  testWidgets('tab bar switches tabs, keeps them, and Meals returns home', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
     await tester.pumpAndSettle();
-    expect(find.byType(SelectableText), findsNothing);
+    expect(find.byKey(const Key('tab-bar')), findsOneWidget);
+    await selectMeal(tester);
+    expect(find.text('Edit meal'), findsOneWidget);
+    // The meal flow's main action is pinned above the tab bar.
+    expect(find.byKey(const Key('submit')), findsOneWidget);
+
+    await tapKey(tester, 'tab-photo');
+    expect(find.text('Change your own meal photo'), findsOneWidget);
+    expect(find.byKey(const Key('submit')), findsNothing);
+
+    // Coming back keeps the meal flow where it was.
+    await tapKey(tester, 'tab-meals');
+    expect(find.text('Edit meal'), findsOneWidget);
+    // Tapping the open Meals tab again goes back to the meal list.
+    await tapKey(tester, 'tab-meals');
+    expect(find.byKey(const Key('dish-chicken_rice')), findsOneWidget);
+    expect(find.byKey(const Key('tab-bar')), findsOneWidget);
   });
 
   testWidgets('screen reader can activate meal, back and change controls', (
