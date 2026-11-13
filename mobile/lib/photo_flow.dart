@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -57,6 +56,15 @@ Future<Uint8List> squarePng(Uint8List bytes, {int side = photoSide}) async {
   image.dispose();
   return data!.buffer.asUint8List();
 }
+
+/// Estimated share of a photo edit that is done after [seconds], for a change
+/// that usually takes [typicalSeconds].
+///
+/// The server reports no progress, so this is an estimate from elapsed time
+/// alone: it reaches about three quarters at the usual time and then slows,
+/// never showing complete before the result arrives.
+double photoEditProgress(int seconds, int typicalSeconds) =>
+    math.min(0.97, 1 - math.exp(-1.5 * seconds / typicalSeconds));
 
 /// One brush stroke in 0–1 photo coordinates; [width] is a fraction of the side.
 class Stroke {
@@ -147,6 +155,30 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   bool _preparing = false;
   String? _error;
   PhotoEditResult? _result;
+  final Stopwatch _waited = Stopwatch();
+  Timer? _ticker;
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  void _startWaiting() {
+    _waited
+      ..reset()
+      ..start();
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _stopWaiting() {
+    _ticker?.cancel();
+    _ticker = null;
+    _waited.stop();
+  }
 
   Future<void> _pick(ImageSource source) async {
     setState(() {
@@ -186,6 +218,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       _stage = _Stage.working;
       _error = null;
     });
+    _startWaiting();
     try {
       final mask = await maskPng(_strokes);
       final result = await widget.api.editPhoto(
@@ -193,12 +226,14 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         imagePng: photo,
         maskPng: mask,
       );
+      _stopWaiting();
       if (!mounted) return;
       setState(() {
         _result = result;
         _stage = _Stage.result;
       });
     } catch (error) {
+      _stopWaiting();
       if (!mounted) return;
       setState(() {
         _stage = _Stage.paint;
@@ -415,24 +450,50 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     ),
   ];
 
-  List<Widget> _workingView() => [
-    const SizedBox(height: 60),
-    Semantics(
-      label: 'Editing your photo',
-      child: const CupertinoActivityIndicator(radius: 16),
-    ),
-    const SizedBox(height: 24),
-    const Text(
-      'Editing your photo…',
-      textAlign: TextAlign.center,
-      style: TextStyle(fontSize: 20),
-    ),
-    const SizedBox(height: 8),
-    const Text(
-      'This usually takes 15 to 60 seconds.',
-      textAlign: TextAlign.center,
-    ),
-  ];
+  List<Widget> _workingView() {
+    final seconds = _waited.elapsed.inSeconds;
+    final typical = _change.typicalSeconds;
+    final late = seconds >= typical + 5;
+    final status = seconds < 2
+        ? 'Sending your photo…'
+        : late
+        ? 'Still working. It may be trying again…'
+        : 'Editing your photo…';
+    return [
+      const SizedBox(height: 60),
+      Text(
+        status,
+        key: const Key('photo-working-status'),
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 20),
+      ),
+      const SizedBox(height: 20),
+      Semantics(
+        label: 'Editing your photo, $seconds seconds so far',
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            key: const Key('photo-working-progress'),
+            value: photoEditProgress(seconds, typical),
+            minHeight: 12,
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Text(
+        '$seconds s so far',
+        key: const Key('photo-working-elapsed'),
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      const SizedBox(height: 8),
+      Text(
+        'This change usually takes about $typical seconds. '
+        'A hard one can take up to a minute. The bar is an estimate.',
+        textAlign: TextAlign.center,
+      ),
+    ];
+  }
 
   List<Widget> _resultView() {
     final result = _result!;

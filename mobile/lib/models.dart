@@ -373,7 +373,7 @@ void _requireIllustrativeSchema(Map<String, dynamic> json) {
 
 /// A change the model can make to a user's own photo (research tasks only).
 class PhotoChange {
-  const PhotoChange(this.id, this.label, this.paintHint);
+  const PhotoChange(this.id, this.label, this.paintHint, this.typicalSeconds);
 
   /// Catalog change identifier sent to the API.
   final String id;
@@ -384,16 +384,23 @@ class PhotoChange {
   /// What the user should paint over.
   final String paintHint;
 
+  /// Seconds this change usually takes when the first attempt is accepted
+  /// (measured on Spark02 on 13 November 2026).
+  final int typicalSeconds;
+
   static const all = [
     PhotoChange(
       'brown_rice',
       'Swap white rice for brown rice',
-      'Paint over the white rice.',
+      'Paint over the white rice only. Keep off the plate and other food.',
+      4,
     ),
     PhotoChange(
       'extra_vegetables',
       'Add some broccoli',
-      'Paint over the rice where the broccoli should go.',
+      'Paint one small patch on the rice where the broccoli should sit. '
+          'Do not paint all the rice.',
+      15,
     ),
   ];
 }

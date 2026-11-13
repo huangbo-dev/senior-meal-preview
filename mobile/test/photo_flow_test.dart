@@ -39,6 +39,20 @@ Future<void> _scrollTo(WidgetTester tester, Key key, {bool up = false}) async {
 }
 
 void main() {
+  test('progress estimate rises with time and never shows complete', () {
+    expect(photoEditProgress(0, 15), 0);
+    var last = 0.0;
+    for (var s = 1; s <= 120; s++) {
+      final p = photoEditProgress(s, 15);
+      expect(p, greaterThanOrEqualTo(last));
+      expect(p, lessThan(1));
+      last = p;
+    }
+    for (final typical in [4, 15]) {
+      expect(photoEditProgress(typical, typical), inInclusiveRange(0.7, 0.85));
+    }
+  });
+
   testWidgets(
     'photo edit is reachable from Meals and off when server says so',
     (tester) async {

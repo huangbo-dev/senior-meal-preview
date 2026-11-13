@@ -83,6 +83,11 @@ PHOTO_DISCLOSURE = (
     "Experimental AI edit of your photo, not reviewed by a person · "
     "Not nutrition, allergen or clinical verification"
 )
+RECOLOUR_DISCLOSURE = (
+    "Your own rice, recoloured to look like brown rice. Not AI-generated, not reviewed by a person · "
+    "Not nutrition, allergen or clinical verification"
+)
+_BLENDED = None
 
 
 class GpuPipelineUnreadyError(RuntimeError):
@@ -431,6 +436,8 @@ def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> d
     with tempfile.TemporaryDirectory(prefix="meal-photo-") as tmp:
         original = Path(tmp) / "input.png"
         image.save(original)
+        if photo_method() == "app":
+            return _run_app_method(research, image, mask, original, change_id, Path(tmp))
         return _run_sgedit(
             research,
             image=image,
@@ -444,6 +451,120 @@ def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> d
             retain=False,
             generated_label=PHOTO_DISCLOSURE,
         )
+
+
+def photo_method() -> str:
+    """`research` (default): the sgedit check-and-retry policy. `app`: the app-only methods."""
+    return "app" if os.environ.get("WORKER_PHOTO_METHOD", "").strip().lower() == "app" else "research"
+
+
+def _preview_data_url(image, Image) -> str:
+    max_side = max(64, min(FIXTURE_SIDE, int(os.environ.get("WORKER_OUTPUT_MAX_SIDE", "768"))))
+    preview = image.convert("RGB")
+    if max(preview.size) > max_side:
+        preview.thumbnail((max_side, max_side), Image.LANCZOS)
+    buf = io.BytesIO()
+    preview.save(buf, format="PNG", optimize=True)
+    url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    if len(url) > MAX_IMAGE_DATA_URL_BYTES:
+        raise GpuPipelineUnreadyError(
+            "Preview PNG exceeds the gateway response limit; lower WORKER_OUTPUT_MAX_SIDE."
+        )
+    return url
+
+
+def _run_app_method(
+    research: SimpleNamespace, image, mask, original_path: Path, change_id: str, tmp: Path
+) -> dict[str, object]:
+    """App-only edits of a user photo (see app_methods.py). Never the research policy.
+
+    brown_rice recolours the user's own rice (no generative model, one attempt).
+    extra_vegetables adds broccoli on the painted patch with blended SDXL image-to-image and
+    retries with a new seed while the checker fails, within the attempt and time limits.
+    The checker verdict is reported as a diagnostic exactly as on the research path.
+    """
+    global _BLENDED
+    loop, Image = research.loop, research.Image
+    task = BUILTIN_TASKS[change_id]
+    try:
+        import app_methods
+
+        max_attempts = max(1, min(8, int(os.environ.get("WORKER_MAX_ATTEMPTS", "4"))))
+        time_budget = max(0.0, float(os.environ.get("WORKER_TIME_BUDGET_SECS", "20")))
+        checker = loop.CheckerClient(
+            url=os.environ.get("WORKER_CHECKER_URL", "").strip() or DEFAULT_CHECKER_URL
+        )
+        box = list(research.editor.crop_box(mask, 0.25, 256, image.size[0]))
+
+        def checked(candidate, name: str) -> dict[str, object]:
+            path = tmp / name
+            candidate.save(path)
+            verdict = checker.check(str(original_path.resolve()), str(path), task, "rice", box)
+            return {
+                "image": candidate,
+                "score": loop.score(verdict),
+                "pass": loop.passes(verdict),
+                "model": str(verdict.get("model", "qwen2.5-vl checker")),
+            }
+
+        with _GPU_LOCK:
+            started = time.monotonic()
+            if change_id == "brown_rice":
+                tried = [checked(app_methods.recolour_rice(image, mask), "recolour.png")]
+                seeds_used = [0]
+                method = "lab-recolour (no generative model)"
+                prompt_id = "{}:recolour:L{:g}a{:g}b{:g}".format(
+                    app_methods.METHOD_VERSION, *app_methods.BROWN_RICE_LAB
+                )
+                label = RECOLOUR_DISCLOSURE
+            else:
+                editor = get_editor(research)
+                if _BLENDED is None:
+                    _BLENDED = app_methods.BlendedEditor(editor)
+                seeds = loop.POLICY["seeds"]
+                tried, seeds_used, durations = [], [], []
+                while len(tried) < max_attempts:
+                    elapsed = time.monotonic() - started
+                    if tried and (
+                        tried[-1]["pass"] or (time_budget and elapsed + max(durations) > time_budget)
+                    ):
+                        break
+                    seed = seeds[len(tried) % len(seeds)]
+                    out = _BLENDED.add_broccoli(image, mask, seed, research.editor)
+                    tried.append(checked(out, f"blend{len(tried)}.png"))
+                    seeds_used.append(seed)
+                    durations.append(time.monotonic() - started - elapsed)
+                method = "sdxl-base-1.0 masked image-to-image"
+                prompt_id = "{}:blend:T1-B:s{:g}:g{:g}".format(
+                    app_methods.METHOD_VERSION,
+                    app_methods.BROCCOLI_STRENGTH,
+                    app_methods.BROCCOLI_GUIDANCE,
+                )
+                label = PHOTO_DISCLOSURE
+            pick = max(range(len(tried)), key=lambda i: tried[i]["score"])
+            selected = tried[pick]
+            image_data_url = _preview_data_url(selected["image"], Image)
+            seconds = time.monotonic() - started
+        sys.stderr.write(
+            f"[gpu-worker] user_photo/{task} (app method): attempts={len(tried)} "
+            f"selected={pick} checker_passed={bool(selected['pass'])} seconds={seconds:.1f}\n"
+        )
+        return {
+            "provider": "tailscale-gpu-worker",
+            "model": f"{method}+{public_model_name(str(selected['model']))}",
+            "prompt_id": prompt_id,
+            "seed": int(seeds_used[pick]),
+            "attempts": len(tried),
+            "checker_passed": bool(selected["pass"]),
+            "image_data_url": image_data_url,
+            "generated_label": label,
+        }
+    except GpuPipelineUnreadyError:
+        raise
+    except Exception as exc:
+        raise GpuPipelineUnreadyError(
+            f"App photo method failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _run_sgedit(

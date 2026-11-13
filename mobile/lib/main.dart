@@ -11,7 +11,7 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Shown in About; keep in step with `version:` in pubspec.yaml and CHANGELOG.md.
-const appVersion = '0.2.0';
+const appVersion = '0.3.0';
 
 void main() => runApp(const MealPreviewApp());
 
