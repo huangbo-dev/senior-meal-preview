@@ -1,3 +1,5 @@
+> Historical 11 November log. Service flags and open tasks below are not current status; see RELEASE_READINESS_20261113.md before acting.
+
 # GPU preview status and next steps (11 November 2026)
 
 The real GPU preview runs end to end on Spark02, but its images are not good enough to show users. Plumbing is not the blocker; image quality is. Details of the runs are in [MODEL_INTEGRATION_PLAN.md](MODEL_INTEGRATION_PLAN.md), "Spark02 real-model runs".

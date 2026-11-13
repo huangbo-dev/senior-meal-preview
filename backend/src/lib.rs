@@ -591,7 +591,7 @@ pub struct PhotoPreview {
 
 fn looks_like_png_base64(value: &str) -> bool {
     value.len() <= MAX_PHOTO_B64_CHARS
-        && value.len() % 4 == 0
+        && value.len().is_multiple_of(4)
         && value.starts_with(PNG_B64_PREFIX)
         && value
             .bytes()

@@ -45,6 +45,12 @@ The local gate verifies code/build behavior and a **dry-run** worker contract on
 
 Before launch, validate the chosen host configuration, DNS and certificate, access controls, allowed/denied requests, API connectivity from a real device, resource limits and a worker outage. Run an actual GPU inference with provenance before claiming the model is connected. Preserve a prior release for rollback. Deployment and distribution remain separate authorized actions.
 
-## Model integration is a separate launch gate
+## Current integration status (13 November)
+The original adapter mismatch below is historical, not the current photo-route
+status. Spark worker 8793 advertises photo_ready=true; fixed-fixture gpu_ready
+remains false. Health readiness is not proof of quality or public connectivity.
+See RELEASE_READINESS_20261113.md.
+
+## Historical model integration launch gate
 
 See [MODEL_INTEGRATION_PLAN.md](MODEL_INTEGRATION_PLAN.md): source inspection found the built-in GPU adapter does not match the current research pipeline interfaces. Dry-run success must not be described as real model readiness. Repair and test that adapter before any real-GPU rollout.
