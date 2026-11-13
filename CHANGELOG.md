@@ -3,7 +3,7 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
-## Unreleased
+## 0.3.2 — 2026-11-13
 
 - **Bottom tab bar** on every screen: Meals · My photo · About. A screen's main action is pinned
   just above it (Generate/Review, Edit choices, Make the change, Try another photo); at large text
