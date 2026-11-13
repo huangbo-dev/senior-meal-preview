@@ -1,7 +1,7 @@
 name: senior_meal_preview
 description: A local, illustrative meal-change preview prototype. Not coursework submission.
 publish_to: none
-version: 0.3.0+3
+version: 0.3.1+4
 
 environment:
   sdk: ^3.12.0
