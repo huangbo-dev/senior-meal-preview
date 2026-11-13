@@ -1,18 +1,18 @@
-# SG Food Edit — Android debug APKs (0.3.0)
+# SG Food Edit — Android debug APKs (0.3.1)
 
-Built on 2026-11-13 from source commit `1f5f3cb` with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-13 from source commit `219a725` with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 
 | File | For |
 | --- | --- |
-| `sg-food-edit-0.3.0-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
-| `sg-food-edit-0.3.0-debug-x86_64.apk` | x86_64 emulators |
+| `sg-food-edit-0.3.1-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
+| `sg-food-edit-0.3.1-debug-x86_64.apk` | x86_64 emulators |
 
-Checksums are in `SHA256SUMS`. The 0.2.0 APKs are in this branch's history (commit `129a79c`).
+Checksums are in `SHA256SUMS`. Earlier APKs are in this branch's history. Do not use 0.3.0: it was built without the meal photos.
 
 ## What's in this build
 
-Version **0.3.0** (Android versionCode 2003; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
+Version **0.3.1** (Android versionCode 2004; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
 
 - **Use my own meal photo** (on the Meals screen): take or choose a photo of a rice meal, pick
   "brown rice" or "add broccoli", paint the area, and get the edited photo back beside the original.

@@ -3,6 +3,11 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.3.1 — 2026-11-13
+
+- Fix: the 0.3.0 APK was built without the three meal reference photos, so every meal card read
+  "Photo unavailable". They are bundled again. No other change.
+
 ## 0.3.0 — 2026-11-13
 
 **Own-photo edits: faster, and they keep your meal** (project team only)
