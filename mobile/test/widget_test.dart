@@ -178,7 +178,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     await tapKey(tester, 'dish-chicken_rice');
     await tapKey(tester, 'change-extra_vegetables');
@@ -205,7 +207,9 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       // The tab bar stays; at large text the main action is never pinned.
       expect(find.byKey(const Key('tab-bar')), findsOneWidget);
@@ -223,7 +227,9 @@ void main() {
   testWidgets('About tab shows the version and licensed photo credits', (
     tester,
   ) async {
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(SelectableText), findsNothing);
     await tapKey(tester, 'tab-about');
@@ -246,7 +252,9 @@ void main() {
   testWidgets('tab bar switches tabs, keeps them, and Meals returns home', (
     tester,
   ) async {
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('tab-bar')), findsOneWidget);
     await selectMeal(tester);
@@ -272,7 +280,9 @@ void main() {
   ) async {
     final handle = tester.ensureSemantics();
     try {
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       expect(
         tester
@@ -310,7 +320,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPadding);
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     await selectMeal(tester);
     expect(
@@ -325,7 +337,7 @@ void main() {
 
   testWidgets('catalog failure has retry and no fake fallback', (tester) async {
     final api = FakeApi()..failCatalog = true;
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     expect(find.text('Let’s reconnect'), findsOneWidget);
     expect(find.byKey(const Key('dish-chicken_rice')), findsNothing);
@@ -339,7 +351,7 @@ void main() {
     tester,
   ) async {
     final api = FakeApi()..pendingCatalog = Completer<Catalog>();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pump();
     expect(find.text('Getting the meal choices…'), findsOneWidget);
     expect(find.byKey(const Key('retry-slow-catalog')), findsNothing);
@@ -357,7 +369,7 @@ void main() {
     tester,
   ) async {
     final api = FakeApi();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('continue')), findsNothing);
     await selectMeal(tester);
@@ -398,7 +410,9 @@ void main() {
     'submission shows honest request summary, edit retains and reset clears',
     (tester) async {
       final api = FakeApi();
-      await tester.pumpWidget(MealPreviewApp(api: api));
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       await tapKey(tester, 'change-extra_vegetables');
@@ -442,7 +456,7 @@ void main() {
 
   testWidgets('submission error keeps choices and can retry', (tester) async {
     final api = FakeApi()..failPreview = true;
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'change-extra_vegetables');
@@ -466,7 +480,7 @@ void main() {
     tester,
   ) async {
     final api = FakeApi()..pending = Completer<MealPreview>();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'change-extra_vegetables');
@@ -493,7 +507,7 @@ void main() {
     tester,
   ) async {
     final api = FakeApi()..pending = Completer<MealPreview>();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'change-extra_vegetables');
@@ -513,7 +527,7 @@ void main() {
 
   testWidgets('wrong-dish response is rejected', (tester) async {
     final api = FakeApi()..pending = Completer<MealPreview>();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'change-extra_vegetables');
@@ -535,7 +549,7 @@ void main() {
     tester,
   ) async {
     final api = FakeApi()..pending = Completer<MealPreview>();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'change-extra_vegetables');
@@ -576,7 +590,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     final api = FakeApi();
-    await tester.pumpWidget(MealPreviewApp(api: api));
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await selectMeal(tester);
@@ -597,7 +611,9 @@ void main() {
     (tester) async {
       final handle = tester.ensureSemantics();
       try {
-        await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+        await tester.pumpWidget(
+          MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+        );
         await tester.pumpAndSettle();
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
@@ -614,7 +630,9 @@ void main() {
     'sentence-case progress, fish soup one-choice copy, and disabled reason',
     (tester) async {
       final api = FakeApi();
-      await tester.pumpWidget(MealPreviewApp(api: api));
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
 
       expect(tester.widget<StepProgress>(find.byType(StepProgress)).step, 0);
@@ -664,7 +682,9 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       expect(
         find.byKey(const Key('meal-compact-chicken_rice')),
@@ -690,7 +710,9 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       await tapKey(tester, 'preferences-open');
@@ -730,7 +752,9 @@ void main() {
     'Tailscale GPU preview mode appears when server advertises capability and renders provenance card',
     (tester) async {
       final api = FakeApi()..gpuPreviewEnabled = true;
-      await tester.pumpWidget(MealPreviewApp(api: api));
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
 
@@ -759,7 +783,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     for (final id in ['chicken_rice', 'fish_soup', 'tofu_rice']) {
       final rect = tester.getRect(find.byKey(Key('dish-$id')));
@@ -775,7 +801,9 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       expect(
@@ -789,7 +817,9 @@ void main() {
   testWidgets(
     'preference sheet applies explicitly and discards drafts on system-back dismissal',
     (tester) async {
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       await tapKey(tester, 'preferences-open');
@@ -817,7 +847,9 @@ void main() {
   ) async {
     final handle = tester.ensureSemantics();
     try {
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       await tapKey(tester, 'preferences-open');
@@ -830,7 +862,9 @@ void main() {
   testWidgets('clear choices requires confirmation and retains the meal', (
     tester,
   ) async {
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'change-extra_vegetables');
@@ -863,7 +897,9 @@ void main() {
   ) async {
     final handle = tester.ensureSemantics();
     try {
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       await tapKey(tester, 'change-extra_vegetables');
@@ -889,7 +925,9 @@ void main() {
   testWidgets('Cancel preferences leaves the applied choices unchanged', (
     tester,
   ) async {
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'texture-soft');
@@ -906,7 +944,9 @@ void main() {
   testWidgets('incidental sheet gestures do not discard a preference draft', (
     tester,
   ) async {
-    await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+    await tester.pumpWidget(
+      MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+    );
     await tester.pumpAndSettle();
     await selectMeal(tester);
     await tapKey(tester, 'texture-soft');
@@ -923,7 +963,9 @@ void main() {
   testWidgets(
     'choosing another meal preserves choices until a different meal is chosen',
     (tester) async {
-      await tester.pumpWidget(MealPreviewApp(api: FakeApi()));
+      await tester.pumpWidget(
+        MealPreviewApp(api: FakeApi(), initialTab: AppTab.meals),
+      );
       await tester.pumpAndSettle();
       await selectMeal(tester);
       await tapKey(tester, 'change-extra_vegetables');

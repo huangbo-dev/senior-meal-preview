@@ -3,6 +3,13 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.4.1 — 2026-11-14
+
+- **The app now opens on "My photo".** It is the first tab, so you can take or choose a meal photo
+  straight away. The sample meals are the second tab (Meals), then About.
+- The phone's back button on Meals or About returns to My photo instead of leaving the app.
+- Replaces 0.4.0, which was published for a few minutes without the 0.3.2 tab bar. Do not use 0.4.0.
+
 ## 0.3.2 — 2026-11-13
 
 - **Bottom tab bar** on every screen: Meals · My photo · About. A screen's main action is pinned

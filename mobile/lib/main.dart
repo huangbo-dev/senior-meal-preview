@@ -11,37 +11,41 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Shown in About; keep in step with `version:` in pubspec.yaml and CHANGELOG.md.
-const appVersion = '0.3.2';
+const appVersion = '0.4.1';
 
 void main() => runApp(const MealPreviewApp());
 
 class MealPreviewApp extends StatelessWidget {
-  const MealPreviewApp({super.key, this.api});
+  const MealPreviewApp({super.key, this.api, this.initialTab = AppTab.photo});
   final MealApi? api;
+
+  /// The tab shown at launch. The own-photo tab is the app's home screen.
+  final AppTab initialTab;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'SG Food Edit',
     debugShowCheckedModeBanner: false,
     theme: buildAppTheme(),
-    home: MealFlow(api: api),
+    home: MealFlow(api: api, initialTab: initialTab),
   );
 }
 
 class MealFlow extends StatefulWidget {
-  const MealFlow({super.key, this.api});
+  const MealFlow({super.key, this.api, this.initialTab = AppTab.photo});
   final MealApi? api;
+  final AppTab initialTab;
   @override
   State<MealFlow> createState() => _MealFlowState();
 }
 
-/// The app's bottom tabs.
-enum AppTab { meals, photo, about }
+/// The app's bottom tabs, in display order. The first one is the home screen.
+enum AppTab { photo, meals, about }
 
 class _MealFlowState extends State<MealFlow> {
   static const _steps = ['Choose a meal', 'Choose changes', 'Review request'];
 
-  AppTab _tab = AppTab.meals;
+  late AppTab _tab = widget.initialTab;
   Future<String>? _credits;
 
   late final MealApi _api;
@@ -205,13 +209,13 @@ class _MealFlowState extends State<MealFlow> {
 
   @override
   Widget build(BuildContext context) => PopScope(
-    canPop: _tab == AppTab.meals && _step == 0,
+    canPop: _tab == AppTab.photo,
     onPopInvokedWithResult: (didPop, result) {
       if (didPop) return;
-      if (_tab != AppTab.meals) {
-        setState(() => _tab = AppTab.meals);
-      } else if (_step > 0) {
+      if (_tab == AppTab.meals && _step > 0) {
         _goTo(_step - 1);
+      } else {
+        setState(() => _tab = AppTab.photo);
       }
     },
     child: Scaffold(
@@ -230,12 +234,12 @@ class _MealFlowState extends State<MealFlow> {
       body: IndexedStack(
         index: _tab.index,
         children: [
-          _mealsTab(),
           PhotoEditPage(
             api: _api,
             available: _catalog?.capabilities.photoUpload ?? false,
             onBackToMeals: () => _selectTab(AppTab.meals),
           ),
+          _mealsTab(),
           _aboutTab(),
         ],
       ),
@@ -256,16 +260,16 @@ class _MealFlowState extends State<MealFlow> {
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: const [
         NavigationDestination(
-          key: Key('tab-meals'),
-          icon: Icon(Icons.restaurant_menu_outlined),
-          selectedIcon: Icon(Icons.restaurant_menu, color: AppColors.accent),
-          label: 'Meals',
-        ),
-        NavigationDestination(
           key: Key('tab-photo'),
           icon: Icon(Icons.photo_camera_outlined),
           selectedIcon: Icon(Icons.photo_camera, color: AppColors.accent),
           label: 'My photo',
+        ),
+        NavigationDestination(
+          key: Key('tab-meals'),
+          icon: Icon(Icons.restaurant_menu_outlined),
+          selectedIcon: Icon(Icons.restaurant_menu, color: AppColors.accent),
+          label: 'Meals',
         ),
         NavigationDestination(
           key: Key('tab-about'),

@@ -14,9 +14,6 @@ const _pngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 Future<void> _openPhotoPage(WidgetTester tester, FakeApi api) async {
   await tester.pumpWidget(MealPreviewApp(api: api));
   await tester.pumpAndSettle();
-  await tester.ensureVisible(find.byKey(const Key('open-photo-edit')));
-  await tester.tap(find.byKey(const Key('open-photo-edit')));
-  await tester.pumpAndSettle();
 }
 
 Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
@@ -65,6 +62,33 @@ void main() {
       expect((camera as dynamic).onPressed, isNull);
     },
   );
+
+  testWidgets('the app opens on the own-photo tab; Meals is a side tab', (
+    tester,
+  ) async {
+    await _openPhotoPage(tester, FakeApi());
+    expect(find.text('Change your own meal photo'), findsOneWidget);
+    expect(
+      find.byKey(const Key('dish-chicken_rice')).hitTestable(),
+      findsNothing,
+    );
+    final bar = tester.widget<NavigationBar>(find.byKey(const Key('tab-bar')));
+    expect(bar.selectedIndex, 0);
+    expect((bar.destinations.first as NavigationDestination).label, 'My photo');
+    await tester.tap(find.byKey(const Key('tab-meals')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('dish-chicken_rice')).hitTestable(),
+      findsOneWidget,
+    );
+    // System back from a side tab returns to the home tab instead of leaving.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Change your own meal photo').hitTestable(),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('take photo, paint rice, get before and after back', (
     tester,
