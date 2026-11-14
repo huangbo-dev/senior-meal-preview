@@ -1,6 +1,6 @@
 # SG Food Edit — Android debug APKs (0.3.2)
 
-Built on 2026-11-13 from source commit `cd9cd22` (`main` and `production`) with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-14 from source commit `cd9cd22` (`main` and `production`) with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 Spark02 is aarch64 and Gradle's aapt2 is x86_64, so the build also passes
 `--android-project-arg=android.aapt2FromMavenOverride=$HOME/toolchains/qemu/aapt2` (runs it under QEMU).
@@ -20,7 +20,7 @@ Version **0.3.2** (Android versionCode 2005 on arm64, 4005 on x86_64; shown in t
   pinned above it; About is now a tab. Plainer error messages, which no longer suggest
   "Summary only" on the photo screen. The recoloured brown-rice result no longer carries an
   "Experimental AI edit" notice next to its "Not AI-generated" label.
-- **Use my own meal photo** (on the Meals screen): take or choose a photo of a rice meal, pick
+- **The app opens on "Change your own meal photo"**: take or choose a photo of a rice meal, pick
   "brown rice" or "add broccoli", paint the area, and get the edited photo back beside the original.
   For the project team only.
   - *Brown rice* recolours your own rice (no AI image model), about 3 s. Paint the rice only:
@@ -31,6 +31,7 @@ Version **0.3.2** (Android versionCode 2005 on arm64, 4005 on x86_64; shown in t
   - These two methods were chosen by eye on one public photo. They are not the CE7454 research
     method and are not evaluated. Results are not reviewed by a person.
   - The photo is cropped and stripped of location data on the phone. The server deletes it after the edit.
+- The sample meals with illustrated changes are behind "No photo? See sample meals instead".
 - Everything from 0.2.0: the three bundled meal reference photos, the app name and icon, and
   **Try again** when the meal list does not load.
 
