@@ -44,3 +44,40 @@ No live restart, deployment, frozen study or rating changes.
 - No source/user meal photos added to Git. Future fresh-checkout builds still require these attributed files before building.
 - No real model latency measurement: browser upload tooling incurred a long delay, not attributable to app inference.
 - Both temporary local servers stopped, temporary browser viewport reset, QA tabs closed. Production services untouched.
+
+## Reproducible reference-photo setup (fresh checkout)
+
+The three meal JPEGs are deliberately **not in Git**, following CLAUDE.md. A bare
+clone therefore cannot show catalogue photos until this explicit prerequisite runs:
+
+```sh
+python3 scripts/fetch_reference_photos.py
+python3 scripts/fetch_reference_photos.py --check
+./scripts/check.sh
+```
+
+On Windows use `python` or the installed Python executable instead of `python3`.
+The acquisition command uses only the three public Wikimedia thumbnail URLs in
+`mobile/assets/meals/ATTRIBUTION.md`; it does not inspect/upload user photographs.
+It verifies pinned SHA-256 hashes and JPEG headers and refuses to overwrite a
+mismatching existing file. If Wikimedia is unreachable or its thumbnail bytes
+change, acquisition fails closed rather than silently accepting a different file.
+A previously verified release/cache is an offline alternative:
+
+```sh
+python3 scripts/fetch_reference_photos.py --source-dir /path/to/assets/meals
+```
+
+The cache must contain the same three pinned files. Original authors, source links
+and Creative Commons license terms remain in ATTRIBUTION.md (bundled by Flutter).
+Retain those notices in distributions, including the tofu image's CC BY-SA terms.
+Once populated, the existing Flutter asset declaration bundles these files into the
+web/native build. Rebuild after acquisition; copying into source does not update an
+already-built package. No photos are committed or force-added.
+
+Acquisition verification: the network command was run against an empty temporary
+repository-shaped directory on ANGEL-WS011. All three Wikimedia downloads passed
+the pinned hashes and installed successfully. Two automated tests cover offline
+cache installation, check mode, invalid bytes/hashes, and refusing to overwrite an
+existing mismatched file. The local candidate build already verified packaging and
+mobile catalogue display; a second full Flutter build from a fresh clone was not run.
