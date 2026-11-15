@@ -66,6 +66,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a meal photo to preview a change.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a meal photo to preview a change.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect to your local meal-preview development server.</string>
 	<key>NSAppTransportSecurity</key>

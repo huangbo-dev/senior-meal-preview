@@ -125,12 +125,12 @@ class _StrokePainter extends CustomPainter {
   bool shouldRepaint(_StrokePainter old) => old.revision != revision;
 }
 
-enum _Stage { choose, paint, working, result }
+enum _Stage { choose, review, paint, working, result }
 
 /// Take or choose a meal photo and get the edited photo back.
 ///
 /// When the server finds the rice itself ([autoMask]) nothing is painted: the
-/// photo is sent as soon as it is chosen. Painting remains as a fallback when
+/// user reviews the crop before sending it. Painting remains as a fallback when
 /// the rice is not found, and as the only way on servers without that ability.
 class PhotoEditPage extends StatefulWidget {
   const PhotoEditPage({
@@ -214,9 +214,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _strokes.clear();
         _revision++;
         _preparing = false;
-        _stage = _Stage.paint;
+        _stage = widget.autoMask ? _Stage.review : _Stage.paint;
       });
-      if (widget.autoMask) unawaited(_submit(painted: false));
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -232,7 +231,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   /// otherwise the server finds the rice itself.
   Future<void> _submit({bool painted = true}) async {
     final photo = _photo;
-    if (photo == null || (painted && _strokes.isEmpty)) return;
+    if (_stage == _Stage.working ||
+        photo == null ||
+        (painted && _strokes.isEmpty)) {
+      return;
+    }
     setState(() {
       _stage = _Stage.working;
       _error = null;
@@ -269,8 +272,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
               'We could not find the rice by ourselves. Paint over it below, '
               'or use a different photo.';
         } else {
-          _stage = _Stage.choose;
-          _photo = null;
+          _stage = _Stage.review;
           _error = message;
         }
       });
@@ -331,6 +333,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
               padding: AppLayout.pagePadding,
               children: switch (_stage) {
                 _Stage.choose => _chooseView(),
+                _Stage.review => _reviewView(),
                 _Stage.paint => _paintView(),
                 _Stage.working => _workingView(),
                 _Stage.result => _resultView(),
@@ -358,18 +361,60 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   Widget? _pinnedAction() {
     if (!pinPrimaryAction(context)) return null;
     return switch (_stage) {
+      _Stage.review => _autoButton(),
       _Stage.paint => _submitButton(),
       _Stage.result => _againButton(),
       _Stage.choose || _Stage.working => null,
     };
   }
 
+  Widget _changeChoices() => RadioGroup<PhotoChange>(
+    groupValue: _change,
+    onChanged: (c) => setState(() => _change = c ?? _change),
+    child: Column(
+      children: [
+        for (final change in PhotoChange.all)
+          if (widget.autoMask || change.paintable)
+            RadioListTile<PhotoChange>(
+              key: Key('photo-change-${change.id}'),
+              value: change,
+              title: Text(change.label),
+              contentPadding: EdgeInsets.zero,
+            ),
+      ],
+    ),
+  );
+
+  Widget _autoButton() => AppPrimaryButton(
+    key: const Key('photo-auto-submit'),
+    label: 'Send photo and make the change',
+    onPressed: () => _submit(painted: false),
+  );
+
+  List<Widget> _reviewView() => [
+    const StepHeading('Check your photo'),
+    const Text('This square is the part of your photo that will be sent.'),
+    Image.memory(_photo!, semanticLabel: 'Cropped meal photo'),
+    if (_error != null) NoticeCard(_error!, error: true),
+    _changeChoices(),
+    if (_change.paintable)
+      TextButton(
+        onPressed: _paintInstead,
+        child: const Text('Mark the area myself'),
+      ),
+    TextButton(
+      onPressed: _startOver,
+      child: const Text('Choose another photo'),
+    ),
+    if (!pinPrimaryAction(context)) _autoButton(),
+  ];
+
   List<Widget> _chooseView() => [
     const StepHeading('Change your own meal photo'),
     const SizedBox(height: 8),
     Text(
       widget.autoMask
-          ? 'Take a photo of a rice meal and see a healthier version of it. '
+          ? 'Take a photo of a rice meal and preview a change to it. '
                 'The rice is found for you.'
           : 'Take a photo of a rice meal, mark the rice, and see one change '
                 'made to it.',
@@ -386,22 +431,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     ],
     const SectionHeading('What should change?'),
     const SizedBox(height: 8),
-    RadioGroup<PhotoChange>(
-      groupValue: _change,
-      onChanged: (c) => setState(() => _change = c ?? _change),
-      child: Column(
-        children: [
-          for (final change in PhotoChange.all)
-            if (widget.autoMask || change.paintable)
-              RadioListTile<PhotoChange>(
-                key: Key('photo-change-${change.id}'),
-                value: change,
-                title: Text(change.label),
-                contentPadding: EdgeInsets.zero,
-              ),
-        ],
-      ),
-    ),
+    _changeChoices(),
     const SizedBox(height: 12),
     if (_error != null) ...[
       NoticeCard(_error!, error: true),

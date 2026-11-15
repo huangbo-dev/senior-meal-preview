@@ -225,6 +225,10 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('photo-gallery')));
     await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-auto-submit')));
+    await tester.ensureVisible(find.byKey(const Key('photo-auto-submit')));
+    await tester.tap(find.byKey(const Key('photo-auto-submit')));
+    await tester.pump();
     await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
 
     expect(api.sentPhotoChange, 'brown_rice+extra_vegetables');
@@ -248,6 +252,10 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('photo-gallery')));
     await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-auto-submit')));
+    await tester.ensureVisible(find.byKey(const Key('photo-auto-submit')));
+    await tester.tap(find.byKey(const Key('photo-auto-submit')));
+    await tester.pump();
     await _pumpUntil(tester, find.byKey(const Key('paint-area')));
     expect(find.textContaining('could not find the rice'), findsOneWidget);
     expect(api.sentMask, isNull);
@@ -270,12 +278,79 @@ void main() {
     await openAuto(tester);
     await tester.tap(find.byKey(const Key('photo-gallery')));
     await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-auto-submit')));
+    await tester.ensureVisible(find.byKey(const Key('photo-auto-submit')));
+    await tester.tap(find.byKey(const Key('photo-auto-submit')));
+    await tester.pump();
     await _pumpUntil(tester, find.byKey(const Key('photo-paint-instead')));
     await tester.tap(find.byKey(const Key('photo-paint-instead')));
     await tester.pump();
     expect(find.byKey(const Key('paint-area')), findsOneWidget);
     expect(find.text('Paint the rice first'), findsOneWidget);
   });
+
+  testWidgets('a failed upload keeps the crop and allows a different edit', (
+    tester,
+  ) async {
+    final api = await openAuto(
+      tester,
+      setUp: (api) => api.photoError = 'Server busy',
+    );
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await _pumpUntil(tester, find.byKey(const Key('photo-auto-submit')));
+    expect(api.photoCalls, 0);
+    await tester.tap(find.byKey(const Key('photo-auto-submit')));
+    await _pumpUntil(tester, find.text('Server busy'));
+    final firstPhoto = api.sentPhoto;
+    api.photoError = null;
+    await tester.tap(find.byKey(const Key('photo-change-extra_vegetables')));
+    await tester.tap(find.byKey(const Key('photo-auto-submit')));
+    await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
+    expect(api.sentPhoto, firstPhoto);
+    expect(api.sentPhotoChange, 'extra_vegetables');
+  });
+
+  testWidgets(
+    'summary only skips the image even if both methods are available',
+    (tester) async {
+      final api = FakeApi()
+        ..autoMask = true
+        ..gpuPreviewEnabled = true;
+      tester.view.physicalSize = const Size(390, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals),
+      );
+      await tester.pumpAndSettle();
+      await selectMeal(tester);
+      await tapKey(tester, 'change-brown_rice');
+      await tester.tap(find.byKey(const Key('submit')));
+      await tester.pumpAndSettle();
+      expect(find.text('Your meal request'), findsOneWidget);
+      expect(api.photoCalls, 0);
+    },
+  );
+
+  testWidgets(
+    'fish soup with added vegetables returns a summary without a rice edit',
+    (tester) async {
+      final api = FakeApi()..autoMask = true;
+      tester.view.physicalSize = const Size(390, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals),
+      );
+      await tester.pumpAndSettle();
+      await selectMeal(tester, id: 'fish_soup');
+      await tapKey(tester, 'change-extra_vegetables');
+      await tester.tap(find.byKey(const Key('submit')));
+      await tester.pumpAndSettle();
+      expect(find.text('Your meal request'), findsOneWidget);
+      expect(api.photoCalls, 0);
+    },
+  );
 
   testWidgets('painting on the photo does not scroll the page', (tester) async {
     await openAuto(tester, autoMask: false);
@@ -413,6 +488,13 @@ void main() {
       await tester.tap(find.byKey(const Key('submit')));
       await tester.pump();
       await _pumpUntil(tester, find.byKey(const Key('picture-saved')));
+      expect(find.byKey(const Key('meal-picture')), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('picture-new')));
+      await tester.tap(find.byKey(const Key('picture-new')));
+      await _pumpUntil(
+        tester,
+        find.textContaining('The new picture could not be made'),
+      );
       expect(find.byKey(const Key('meal-picture')), findsOneWidget);
     },
   );

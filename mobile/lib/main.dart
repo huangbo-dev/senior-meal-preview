@@ -158,6 +158,7 @@ class _MealFlowState extends State<MealFlow> {
 
   void _goTo(int step) {
     ++_requestVersion;
+    if (_makingPicture) _stopPictureWait();
     setState(() {
       _step = step;
       _submitting = false;
@@ -177,7 +178,7 @@ class _MealFlowState extends State<MealFlow> {
 
   /// Key of a saved picture: the meal and the changes it shows.
   String _pictureKey(String dishId) =>
-      '$dishId-${(List.of(_picturable)..sort()).join('+')}';
+      'ref-v060-edit-v4-$dishId-${(List.of(_picturable)..sort()).join('+')}';
 
   /// [fresh] skips a saved picture and asks the server for a new one.
   Future<void> _submit({bool fresh = false}) async {
@@ -226,6 +227,7 @@ class _MealFlowState extends State<MealFlow> {
         // The summary is ready; a missing picture never blocks it.
         final key = _pictureKey(dish.id);
         final saved = await _pictures.read(key);
+        if (!mounted || version != _requestVersion) return;
         if (saved != null && !fresh) {
           picture = saved.result;
           savedAt = saved.madeAt;
@@ -233,26 +235,30 @@ class _MealFlowState extends State<MealFlow> {
           _startPictureWait();
           try {
             final asset = await rootBundle.load('assets/meals/${dish.id}.jpg');
+            final image = await squarePng(asset.buffer.asUint8List());
+            if (!mounted || version != _requestVersion) return;
             picture = await _api.editPhoto(
               changeIds: _picturable,
-              imagePng: await squarePng(asset.buffer.asUint8List()),
+              imagePng: image,
             );
             await _pictures.write(key, SavedPicture(picture, DateTime.now()));
           } catch (error) {
             if (saved != null) {
               // A new one could not be made: keep showing the earlier one.
+              pictureNote =
+                  'The new picture could not be made. Showing your saved picture.';
               picture = saved.result;
               savedAt = saved.madeAt;
             } else {
               pictureNote =
                   error is ApiException && error.code == 'rice_not_found'
-                  ? 'This meal photo shows no rice to change, so there is no '
+                  ? 'The editor could not locate rice in this photo to make a '
                         'picture. Your request is summarised below.'
                   : 'A picture could not be made this time. Your request is '
                         'summarised below.';
             }
           } finally {
-            _stopPictureWait();
+            if (mounted && version == _requestVersion) _stopPictureWait();
           }
         }
         if (!mounted || version != _requestVersion) return;
@@ -332,7 +338,11 @@ class _MealFlowState extends State<MealFlow> {
 
   /// The chosen changes a picture can show, when the server finds the rice
   /// in the meal's reference photo itself. Empty means summary only.
-  List<String> get _picturable => (_catalog?.capabilities.autoMask ?? false)
+  List<String> get _picturable =>
+      const {'chicken_rice', 'tofu_rice'}.contains(_dish?.id) &&
+          (_catalog?.capabilities.autoMask ?? false) &&
+          (_catalog?.capabilities.photoUpload ?? false) &&
+          !(_catalog?.capabilities.gpuPreview ?? false)
       ? PhotoChange.picturable(_changes)
       : const [];
 
@@ -575,9 +585,11 @@ class _MealFlowState extends State<MealFlow> {
     );
     if (confirmed != true || !mounted) return;
     ++_requestVersion;
+    if (_makingPicture) _stopPictureWait();
     setState(() {
       _changes.clear();
       _preferences = const MealPreferences();
+      _renderMode = 'illustrative_only';
       _preview = null;
       _submitting = false;
       _error = null;
@@ -1173,11 +1185,16 @@ class _MealFlowState extends State<MealFlow> {
         key: const Key('preview-disclosure'),
         style: Theme.of(context).textTheme.bodyMedium,
       ),
+      Text(
+        'Automatic check: ${shown.checkerPassed ? "passed" : "not passed"} '
+        '(not a human review)',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      if (_pictureNote != null) NoticeCard(_pictureNote!),
       if (_pictureSavedAt != null) ...[
         const SizedBox(height: 10),
         NoticeCard(
-          'Saved picture, made on ${_formatMade(_pictureSavedAt!)} by the same '
-          'method. Shown again without asking the server.',
+          'Picture saved on this device · ${_formatMade(_pictureSavedAt!)}',
           key: const Key('picture-saved'),
         ),
         TextButton(
