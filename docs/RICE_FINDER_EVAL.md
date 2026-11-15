@@ -47,3 +47,15 @@ The checker selects candidates; it is not a person's judgement.
 
 On held-out photos the new colour reads more as brown rice but less realistic, and the pass rate
 did not change. It is a trade-off, not a measured improvement.
+
+## Paired demo check on three Singapore meals
+
+On 15 November 2026, Spark 02 ran the 0.6.0 app methods on three public meal photos. For each 1024 px square crop, a rice mask was manually traced and visually checked before inspecting automatic masks or edits. These are approximate single-reviewer outlines. Each arm used the same source pixels, app-v3 colour target, broccoli placement rule, SDXL configuration and broccoli seed (1107). There was one candidate per condition. Qwen judged each candidate. This diagnostic used the worker functions directly and did not measure upload latency or the app retry policy.
+
+| Meal (Wikimedia Commons ID) | Rice-mask IoU | Brown rice, automatic / hand | Broccoli, automatic / hand |
+| --- | ---: | --- | --- |
+| White chicken rice (30708968) | 0.84 | fail / pass | fail / fail |
+| Roast chicken and char siu (28840135) | 0.31 | fail / fail | fail / pass |
+| Changi T4 chicken rice (140834417) | 0.36 | fail / fail | pass / pass |
+
+The Changi automatic mask included the pale chicken. Recolouring tinted the meat, and a broccoli candidate covered it while still passing Qwen. The reviewed mask moved the floret toward the edge of the rice. On the close-up chicken meal both masks produced a single, conspicuously bright floret. Before showcasing a live edit, inspect the proposed region over the original and offer correction. Then test broccoli portion size, contact with the rice and lighting on the same reviewed region. These three meals cannot establish a general performance gain.
