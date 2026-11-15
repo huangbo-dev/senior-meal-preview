@@ -21,7 +21,7 @@ class MealPreviewApp extends StatelessWidget {
   const MealPreviewApp({
     super.key,
     this.api,
-    this.initialTab = AppTab.photo,
+    this.initialTab = AppTab.meals,
     this.pictures,
   });
   final MealApi? api;
@@ -29,7 +29,7 @@ class MealPreviewApp extends StatelessWidget {
   /// Where edited meal pictures are kept; defaults to the phone's storage.
   final PictureStore? pictures;
 
-  /// The tab shown at launch. The own-photo tab is the app's home screen.
+  /// The tab shown at launch. The default home screen is Meals.
   final AppTab initialTab;
 
   @override
@@ -45,7 +45,7 @@ class MealFlow extends StatefulWidget {
   const MealFlow({
     super.key,
     this.api,
-    this.initialTab = AppTab.photo,
+    this.initialTab = AppTab.meals,
     this.pictures,
   });
   final MealApi? api;
@@ -56,7 +56,7 @@ class MealFlow extends StatefulWidget {
 }
 
 /// The app's bottom tabs, in display order. The first one is the home screen.
-enum AppTab { photo, meals, about }
+enum AppTab { meals, photo, about }
 
 class _MealFlowState extends State<MealFlow> {
   static const _steps = ['Choose a meal', 'Choose changes', 'Review request'];
@@ -360,13 +360,13 @@ class _MealFlowState extends State<MealFlow> {
 
   @override
   Widget build(BuildContext context) => PopScope(
-    canPop: _tab == AppTab.photo,
+    canPop: _tab == AppTab.meals && _step == 0,
     onPopInvokedWithResult: (didPop, result) {
       if (didPop) return;
       if (_tab == AppTab.meals && _step > 0) {
         _goTo(_step - 1);
       } else {
-        setState(() => _tab = AppTab.photo);
+        setState(() => _tab = AppTab.meals);
       }
     },
     child: Scaffold(
@@ -385,13 +385,13 @@ class _MealFlowState extends State<MealFlow> {
       body: IndexedStack(
         index: _tab.index,
         children: [
+          _mealsTab(),
           PhotoEditPage(
             api: _api,
             available: _catalog?.capabilities.photoUpload ?? false,
             autoMask: _catalog?.capabilities.autoMask ?? false,
             onBackToMeals: () => _selectTab(AppTab.meals),
           ),
-          _mealsTab(),
           _aboutTab(),
         ],
       ),
@@ -412,16 +412,16 @@ class _MealFlowState extends State<MealFlow> {
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: const [
         NavigationDestination(
-          key: Key('tab-photo'),
-          icon: Icon(Icons.photo_camera_outlined),
-          selectedIcon: Icon(Icons.photo_camera, color: AppColors.accent),
-          label: 'My photo',
-        ),
-        NavigationDestination(
           key: Key('tab-meals'),
           icon: Icon(Icons.restaurant_menu_outlined),
           selectedIcon: Icon(Icons.restaurant_menu, color: AppColors.accent),
           label: 'Meals',
+        ),
+        NavigationDestination(
+          key: Key('tab-photo'),
+          icon: Icon(Icons.photo_camera_outlined),
+          selectedIcon: Icon(Icons.photo_camera, color: AppColors.accent),
+          label: 'My photo',
         ),
         NavigationDestination(
           key: Key('tab-about'),
@@ -867,7 +867,8 @@ class _MealFlowState extends State<MealFlow> {
         builder: (context, refresh) {
           return FractionallySizedBox(
             heightFactor:
-                textScaleOf(context) > 1.3 || _catalog!.capabilities.gpuPreview
+                stackPreferenceOptions(context) ||
+                    _catalog!.capabilities.gpuPreview
                 ? .9
                 : .78,
             child: SafeArea(
@@ -876,7 +877,7 @@ class _MealFlowState extends State<MealFlow> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-                    child: textScaleOf(context) > 1.3
+                    child: stackPreferenceOptions(context)
                         ? Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [

@@ -627,6 +627,18 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       StepHeading(_change.label),
       const SizedBox(height: 6),
       Text(
+        'Attempts: ${result.artifact.attempts} · Automatic check: '
+        '${result.artifact.checkerPassed ? "passed" : "not passed"} '
+        '(not a human review)',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      if (widget.autoMask && _change.paintable)
+        TextButton(
+          key: const Key('photo-paint-instead'),
+          onPressed: _paintInstead,
+          child: const Text('Mark the rice yourself'),
+        ),
+      Text(
         'Drag across the photo to compare before and after.',
         style: Theme.of(context).textTheme.bodyMedium,
       ),
@@ -643,12 +655,6 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         style: Theme.of(context).textTheme.titleMedium,
       ),
       const SizedBox(height: 4),
-      Text(
-        'Attempts: ${result.artifact.attempts} · Automatic check: '
-        '${result.artifact.checkerPassed ? "passed" : "not passed"} '
-        '(not a human review)',
-        style: Theme.of(context).textTheme.bodyMedium,
-      ),
       const SizedBox(height: 12),
       for (final notice in result.notices) ...[
         NoticeCard(notice),
@@ -659,12 +665,6 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _againButton(),
         const SizedBox(height: 8),
       ],
-      if (widget.autoMask && _change.paintable)
-        TextButton(
-          key: const Key('photo-paint-instead'),
-          onPressed: _paintInstead,
-          child: const Text('Not right? Mark the rice yourself'),
-        ),
       TextButton(
         key: const Key('photo-back-to-meals'),
         onPressed:

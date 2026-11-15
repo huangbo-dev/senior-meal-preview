@@ -573,7 +573,11 @@ class PreferenceOption {
   final VoidCallback onSelect;
 }
 
-/// An optional single-choice preference (e.g. texture) with a contextual helper.
+/// Android scales text nonlinearly. Measure the 18-point option label itself.
+bool stackPreferenceOptions(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(18) > 18 * 1.3;
+
+/// An optional single-choice preference with a contextual helper.
 class PreferenceGroup extends StatelessWidget {
   const PreferenceGroup({
     super.key,
@@ -600,7 +604,7 @@ class PreferenceGroup extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.all(4),
-          child: textScaleOf(context) <= 1.3
+          child: !stackPreferenceOptions(context)
               ? Row(
                   children: [
                     for (final option in options)
