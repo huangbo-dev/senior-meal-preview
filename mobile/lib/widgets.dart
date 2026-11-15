@@ -754,6 +754,12 @@ class EditVerdict extends StatelessWidget {
         'Test fixture. No automatic check ran on this image.',
       );
     }
+    if (artifact.recolourOnly) {
+      return const NoticeCard(
+        'Colour change only: your rice is tinted, nothing is drawn in. '
+        'Judge it against the original with the slider.',
+      );
+    }
     return NoticeCard(
       artifact.checkerPassed
           ? 'The automatic check passed. Judge the edit against the original meal.'

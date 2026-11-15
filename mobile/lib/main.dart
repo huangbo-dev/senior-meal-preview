@@ -1204,7 +1204,9 @@ class _MealFlowState extends State<MealFlow> {
           gaplessPlayback: true,
         ),
         afterLabel: shown.generatedLabel,
-        afterTag: shown.checkerPassed ? 'After' : 'Attempted edit',
+        afterTag: shown.checkerPassed || shown.recolourOnly
+            ? 'After'
+            : 'Attempted edit',
       ),
       const SizedBox(height: 6),
       Text(

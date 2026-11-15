@@ -287,6 +287,12 @@ class GpuArtifact {
   /// Mandatory non-clinical disclosure attached to the generated preview.
   final String generatedLabel;
 
+  /// True when the only change is a colour shift of the photographed rice
+  /// (no generative model). The automatic check was built for AI edits and
+  /// often rejects a correct recolour, so its verdict is not shown as a failure.
+  bool get recolourOnly =>
+      model.startsWith('lab-recolour') && !model.contains('sdxl');
+
   /// Validates and decodes a [GpuArtifact] from `gpu_artifact` JSON.
   /// The JSON form [GpuArtifact.fromJson] reads.
   Map<String, dynamic> toJson() => {

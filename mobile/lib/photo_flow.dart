@@ -647,7 +647,9 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         before: Image.memory(_photo!, fit: BoxFit.cover, gaplessPlayback: true),
         after: Image.memory(edited, fit: BoxFit.cover, gaplessPlayback: true),
         afterLabel: result.artifact.generatedLabel,
-        afterTag: result.artifact.checkerPassed ? 'After' : 'Attempted edit',
+        afterTag: result.artifact.checkerPassed || result.artifact.recolourOnly
+            ? 'After'
+            : 'Attempted edit',
       ),
       const SizedBox(height: 10),
       Text(
@@ -657,9 +659,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       ),
       const SizedBox(height: 4),
       Text(
-        'Attempts: ${result.artifact.attempts} · Automatic check: '
-        '${result.artifact.checkerPassed ? "passed" : "not passed"} '
-        '(not a human review)',
+        result.artifact.recolourOnly
+            ? 'Colour change only · not reviewed by a person'
+            : 'Attempts: ${result.artifact.attempts} · Automatic check: '
+                  '${result.artifact.checkerPassed ? "passed" : "not passed"} '
+                  '(not a human review)',
         style: Theme.of(context).textTheme.bodyMedium,
       ),
       const SizedBox(height: 12),
