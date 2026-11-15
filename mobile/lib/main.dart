@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'api.dart';
+import 'mask_review.dart';
 import 'models.dart';
 import 'photo_flow.dart';
 import 'picture_store.dart';
@@ -14,7 +15,7 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Shown in About; keep in step with `version:` in pubspec.yaml and CHANGELOG.md.
-const appVersion = '0.6.0';
+const appVersion = '0.7.0';
 
 void main() => runApp(const MealPreviewApp());
 
@@ -256,9 +257,24 @@ class _MealFlowState extends State<MealFlow> {
           _startPictureWait();
           try {
             final asset = await rootBundle.load('assets/meals/${dish.id}.jpg');
+            final photo = await squarePng(asset.buffer.asUint8List());
+            Uint8List? mask;
+            if (_catalog!.capabilities.maskReview) {
+              if (!mounted || version != _requestVersion) return;
+              _stopPictureWait();
+              mask = await reviewRiceMask(context, _api, photo);
+              if (!mounted || version != _requestVersion) return;
+              if (mask == null) {
+                setState(() => _submitting = false);
+                return;
+              }
+              _startPictureWait();
+            }
             picture = await _api.editPhoto(
               changeIds: _picturable,
-              imagePng: await squarePng(asset.buffer.asUint8List()),
+              imagePng: photo,
+              maskPng: mask,
+              reviewedRice: mask != null,
             );
             await _pictures.write(key, SavedPicture(picture, DateTime.now()));
           } catch (error) {
@@ -401,6 +417,7 @@ class _MealFlowState extends State<MealFlow> {
           PhotoEditPage(
             api: _api,
             available: _catalog?.capabilities.photoUpload ?? false,
+            maskReview: _catalog?.capabilities.maskReview ?? false,
             autoMask: _catalog?.capabilities.autoMask ?? false,
             onBackToMeals: () => _selectTab(AppTab.meals),
           ),

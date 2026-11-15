@@ -102,6 +102,7 @@ class CatalogCapabilities {
     this.gpuPreview = false,
     this.photoUpload = false,
     this.autoMask = false,
+    this.maskReview = false,
   });
 
   /// Whether deterministic symbolic plate illustrations are available.
@@ -116,6 +117,7 @@ class CatalogCapabilities {
   /// Whether the server finds the rice in a photo itself, so nothing has to
   /// be painted and two changes can be made to one photo.
   final bool autoMask;
+  final bool maskReview;
 
   /// Decodes [CatalogCapabilities] from the optional `capabilities` JSON map.
   factory CatalogCapabilities.fromJson(Object? json) => switch (json) {
@@ -124,6 +126,10 @@ class CatalogCapabilities {
       CatalogCapabilities(
         gpuPreview: gpu,
         photoUpload: (json as Map)['photo_upload'] == true,
+        maskReview:
+            json['photo_upload'] == true &&
+            json['auto_mask'] == true &&
+            json['mask_review'] == true,
         autoMask: json['photo_upload'] == true && json['auto_mask'] == true,
       ),
     _ => throw const FormatException('Symbolic preview must remain enabled.'),

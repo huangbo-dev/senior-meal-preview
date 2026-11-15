@@ -59,3 +59,14 @@ On 15 November 2026, Spark 02 ran the 0.6.0 app methods on three public meal pho
 | Changi T4 chicken rice (140834417) | 0.36 | fail / fail | pass / pass |
 
 The Changi automatic mask included the pale chicken. Recolouring tinted the meat, and a broccoli candidate covered it while still passing Qwen. The reviewed mask moved the floret toward the edge of the rice. On the close-up chicken meal both masks produced a single, conspicuously bright floret. Before showcasing a live edit, inspect the proposed region over the original and offer correction. Then test broccoli portion size, contact with the rice and lighting on the same reviewed region. These three meals cannot establish a general performance gain.
+
+## Changi in-app mask review
+
+On the same Changi photo, version 0.7.0 sent the photo to Spark 02 for segmentation, then displayed the returned region in the web app. The reviewer erased part of the chicken and added rice along the left edge before confirming. Both edit requests carried the same corrected region. A second pair used the untouched detector mask with the same source pixels and app methods. Each condition used one candidate (broccoli seed 1107).
+
+| Region | IoU with earlier hand trace | Precision | Recall | Brown rice (Qwen) | Broccoli (Qwen) |
+| --- | ---: | ---: | ---: | --- | --- |
+| Detected | 0.36 | 0.39 | 0.85 | Fail | Pass |
+| Corrected in app | 0.52 | 0.59 | 0.81 | Fail | Pass |
+
+The corrected recolour left more chicken unchanged. The broccoli moved from the front of the chicken to the rice beside the cucumber. Some visible rice was omitted, and the broccoli still appeared as a single bright floret. This is a one-photo interaction test using an approximate hand trace.

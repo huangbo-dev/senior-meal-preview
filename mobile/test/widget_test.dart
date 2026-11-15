@@ -42,6 +42,7 @@ class FakeApi implements MealApi {
   bool photoUpload = true;
   bool autoMask = false;
   bool checkerPassed = true;
+  bool sentReviewedRice = false;
   int photoCalls = 0;
   String? photoError;
   String? photoErrorCode;
@@ -50,12 +51,18 @@ class FakeApi implements MealApi {
   Uint8List? sentMask;
 
   @override
+  Future<Uint8List> riceMask(Uint8List imagePng) async =>
+      throw const ApiException('No rice', code: 'rice_not_found');
+
+  @override
   Future<PhotoEditResult> editPhoto({
     required List<String> changeIds,
     required Uint8List imagePng,
     Uint8List? maskPng,
+    bool reviewedRice = false,
   }) async {
     final changeId = changeIds.join('+');
+    sentReviewedRice = reviewedRice;
     photoCalls++;
     sentPhotoChange = changeId;
     sentPhoto = imagePng;

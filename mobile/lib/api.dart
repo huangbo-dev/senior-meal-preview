@@ -28,7 +28,10 @@ abstract interface class MealApi {
     required List<String> changeIds,
     required Uint8List imagePng,
     Uint8List? maskPng,
+    bool reviewedRice = false,
   });
+
+  Future<Uint8List> riceMask(Uint8List imagePng);
 
   /// Releases any underlying HTTP client resources.
   void close();
@@ -143,10 +146,22 @@ class HttpMealApi implements MealApi {
   }
 
   @override
+  Future<Uint8List> riceMask(Uint8List imagePng) => _perform(
+    () => _client.post(
+      _endpoint('/api/v1/rice-mask'),
+      headers: _headers(jsonBody: true),
+      body: jsonEncode({'image_png_base64': base64Encode(imagePng)}),
+    ),
+    (json) => base64Decode(json['mask_png_base64'] as String),
+    limit: photoTimeout,
+  );
+
+  @override
   Future<PhotoEditResult> editPhoto({
     required List<String> changeIds,
     required Uint8List imagePng,
     Uint8List? maskPng,
+    bool reviewedRice = false,
   }) => _perform(
     () => _client.post(
       _endpoint('/api/v1/photo-preview'),
@@ -155,7 +170,11 @@ class HttpMealApi implements MealApi {
         // A painted mask uses the original single-change form, which servers
         // without automatic rice finding also accept.
         if (maskPng != null) ...{
-          'change_id': changeIds.single,
+          if (reviewedRice) ...{
+            'change_ids': changeIds,
+            'reviewed_rice': true,
+          } else
+            'change_id': changeIds.single,
           'mask_png_base64': base64Encode(maskPng),
         } else
           'change_ids': changeIds,

@@ -98,6 +98,8 @@ pub struct WorkerPhotoRequest {
     pub image_png_base64: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mask_png_base64: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reviewed_rice: bool,
 }
 
 /// Provenance and output returned by the GPU worker and forwarded to the client.
@@ -265,6 +267,7 @@ pub struct WorkerReadiness {
     pub photo_upload: bool,
     /// Photo edits without a painted mask: the worker finds the rice itself.
     pub auto_mask: bool,
+    pub mask_review: bool,
 }
 
 pub async fn worker_readiness(config: &GpuWorkerConfig) -> WorkerReadiness {
@@ -327,6 +330,8 @@ async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<WorkerReadine
         photo_ready: bool,
         #[serde(default)]
         auto_mask_ready: bool,
+        #[serde(default)]
+        mask_review: bool,
     }
     let Ok(health) = serde_json::from_slice::<Readiness>(&bytes[end + 4..]) else {
         return Ok(WorkerReadiness::default());
@@ -336,6 +341,7 @@ async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<WorkerReadine
         gpu_preview: real && health.gpu_ready,
         photo_upload: real && health.photo_ready,
         auto_mask: real && health.photo_ready && health.auto_mask_ready,
+        mask_review: real && health.photo_ready && health.auto_mask_ready && health.mask_review,
     })
 }
 
@@ -344,40 +350,35 @@ pub async fn request_gpu_preview(
     config: &GpuWorkerConfig,
     payload: &WorkerGenerateRequest,
 ) -> Result<GpuArtifact, WorkerFailure> {
-    let _permit = config
-        .semaphore
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| WorkerFailure::Busy)?;
-
-    let body = serde_json::to_vec(payload)
-        .map_err(|e| WorkerFailure::InvalidResponse(format!("Cannot encode request: {e}")))?;
-    tokio::time::timeout(
-        config.timeout,
-        send_worker_http(config, "/v1/generate", body),
-    )
-    .await
-    .map_err(|_| WorkerFailure::Timeout)?
+    let artifact = request_worker(config, "/v1/generate", payload).await?;
+    validate_gpu_artifact(&artifact)?;
+    Ok(artifact)
 }
 
-/// Ask the worker to edit a photo (rice found automatically, or inside a painted mask).
 pub async fn request_gpu_photo_edit(
     config: &GpuWorkerConfig,
     payload: &WorkerPhotoRequest,
 ) -> Result<GpuArtifact, WorkerFailure> {
+    let artifact = request_worker(config, "/v1/generate-photo", payload).await?;
+    validate_gpu_artifact(&artifact)?;
+    Ok(artifact)
+}
+
+pub(crate) async fn request_worker<T: serde::de::DeserializeOwned>(
+    config: &GpuWorkerConfig,
+    route: &str,
+    payload: &impl Serialize,
+) -> Result<T, WorkerFailure> {
     let _permit = config
         .semaphore
         .clone()
         .try_acquire_owned()
         .map_err(|_| WorkerFailure::Busy)?;
-    let body = serde_json::to_vec(payload)
-        .map_err(|e| WorkerFailure::InvalidResponse(format!("Cannot encode request: {e}")))?;
-    tokio::time::timeout(
-        config.timeout,
-        send_worker_http(config, "/v1/generate-photo", body),
-    )
-    .await
-    .map_err(|_| WorkerFailure::Timeout)?
+    let body =
+        serde_json::to_vec(payload).map_err(|e| WorkerFailure::InvalidResponse(e.to_string()))?;
+    tokio::time::timeout(config.timeout, send_worker_http(config, route, body))
+        .await
+        .map_err(|_| WorkerFailure::Timeout)?
 }
 
 async fn resolve_verified_addr(endpoint: &WorkerEndpoint) -> Result<SocketAddr, WorkerFailure> {
@@ -405,11 +406,11 @@ async fn resolve_verified_addr(endpoint: &WorkerEndpoint) -> Result<SocketAddr, 
     ))
 }
 
-async fn send_worker_http(
+async fn send_worker_http<T: serde::de::DeserializeOwned>(
     config: &GpuWorkerConfig,
     route: &str,
     body: Vec<u8>,
-) -> Result<GpuArtifact, WorkerFailure> {
+) -> Result<T, WorkerFailure> {
     let addr = resolve_verified_addr(&config.endpoint).await?;
     let mut stream = TcpStream::connect(addr)
         .await
@@ -484,10 +485,8 @@ async fn send_worker_http(
             )));
         }
     }
-    let artifact: GpuArtifact = serde_json::from_slice(json_slice)
-        .map_err(|e| WorkerFailure::InvalidResponse(format!("Invalid worker JSON schema: {e}")))?;
-    validate_gpu_artifact(&artifact)?;
-    Ok(artifact)
+    serde_json::from_slice(json_slice)
+        .map_err(|e| WorkerFailure::InvalidResponse(format!("Invalid worker JSON schema: {e}")))
 }
 
 fn validate_gpu_artifact(artifact: &GpuArtifact) -> Result<(), WorkerFailure> {

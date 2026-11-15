@@ -196,6 +196,7 @@ void main() {
   Future<FakeApi> openAuto(
     WidgetTester tester, {
     bool autoMask = true,
+    bool maskReview = false,
     void Function(FakeApi)? setUp,
   }) async {
     final api = FakeApi();
@@ -210,12 +211,47 @@ void main() {
           api: api,
           available: true,
           autoMask: autoMask,
+          maskReview: maskReview,
           picker: (_) async => png,
         ),
       ),
     );
     return api;
   }
+
+  testWidgets('cancelling rice review sends no generation request', (
+    tester,
+  ) async {
+    final api = await openAuto(tester, maskReview: true);
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.text('Cancel'));
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('photo-gallery')), findsOneWidget);
+    expect(api.photoCalls, 0);
+  });
+
+  testWidgets('a manually corrected region is sent only on confirmation', (
+    tester,
+  ) async {
+    final api = await openAuto(tester, maskReview: true);
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    final canvas = find.byKey(const Key('rice-review-canvas'));
+    await _pumpUntil(tester, find.text('Use this area and generate'));
+    await tester.pumpAndSettle();
+    final centre = tester.getCenter(canvas);
+    await tester.dragFrom(centre, const Offset(180, 0));
+    await tester.pump();
+    expect(api.photoCalls, 0);
+    await tester.tap(find.text('Use this area and generate'));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
+    expect(api.photoCalls, 1);
+    expect(api.sentReviewedRice, isTrue);
+    expect(api.sentMask!.sublist(0, 8), _pngSignature);
+  });
 
   testWidgets('with automatic rice finding a chosen photo is edited with '
       'no painting, and both changes can be made at once', (tester) async {

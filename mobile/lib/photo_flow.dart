@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'api.dart';
+import 'mask_review.dart';
 import 'models.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -129,15 +130,15 @@ enum _Stage { choose, paint, working, result }
 
 /// Take or choose a meal photo and get the edited photo back.
 ///
-/// When the server finds the rice itself ([autoMask]) nothing is painted: the
-/// photo is sent as soon as it is chosen. Painting remains as a fallback when
-/// the rice is not found, and as the only way on servers without that ability.
+/// With mask review enabled, the user confirms the detected or hand-drawn rice
+/// before generation. Older servers support automatic or manually painted edits.
 class PhotoEditPage extends StatefulWidget {
   const PhotoEditPage({
     super.key,
     required this.api,
     required this.available,
     this.autoMask = false,
+    this.maskReview = false,
     this.picker = pickWithImagePicker,
     this.onBackToMeals,
   });
@@ -152,6 +153,7 @@ class PhotoEditPage extends StatefulWidget {
 
   /// Whether the server advertised `auto_mask` (it finds the rice itself).
   final bool autoMask;
+  final bool maskReview;
   final PhotoPicker picker;
 
   @override
@@ -162,6 +164,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   _Stage _stage = _Stage.choose;
   PhotoChange _change = PhotoChange.all.first;
   Uint8List? _photo;
+  Uint8List? _reviewedMask;
   final List<Stroke> _strokes = [];
   int _revision = 0;
   bool _bigBrush = true;
@@ -209,8 +212,15 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       }
       final square = await squarePng(bytes);
       if (!mounted) return;
+      if (widget.maskReview) {
+        _photo = square;
+        _reviewedMask = null;
+        await _review();
+        return;
+      }
       setState(() {
         _photo = square;
+        _reviewedMask = null;
         _strokes.clear();
         _revision++;
         _preparing = false;
@@ -228,6 +238,24 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     }
   }
 
+  Future<void> _review() async {
+    final photo = _photo;
+    if (photo == null) return;
+    final mask = await reviewRiceMask(
+      context,
+      widget.api,
+      photo,
+      initial: _reviewedMask,
+    );
+    if (!mounted) return;
+    setState(() {
+      _preparing = false;
+    });
+    if (mask == null) return;
+    _reviewedMask = mask;
+    await _submit(painted: false);
+  }
+
   /// Sends the photo. With [painted] the strokes mark the area to change;
   /// otherwise the server finds the rice itself.
   Future<void> _submit({bool painted = true}) async {
@@ -242,7 +270,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       final result = await widget.api.editPhoto(
         changeIds: _change.ids,
         imagePng: photo,
-        maskPng: painted ? await maskPng(_strokes) : null,
+        maskPng: painted ? await maskPng(_strokes) : _reviewedMask,
+        reviewedRice: !painted && _reviewedMask != null,
       );
       _stopWaiting();
       if (!mounted) return;
@@ -259,7 +288,10 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       final riceNotFound =
           error is ApiException && error.code == 'rice_not_found';
       setState(() {
-        if (painted) {
+        if (_reviewedMask != null) {
+          _stage = _Stage.choose;
+          _error = message;
+        } else if (painted) {
           _stage = _Stage.paint;
           _error = message;
         } else if (riceNotFound && _change.paintable) {
@@ -289,6 +321,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   void _startOver() => setState(() {
     _stage = _Stage.choose;
     _photo = null;
+    _reviewedMask = null;
     _result = null;
     _error = null;
     _strokes.clear();
@@ -368,9 +401,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     const StepHeading('Change your own meal photo'),
     const SizedBox(height: 8),
     Text(
-      widget.autoMask
+      widget.maskReview
+          ? 'Choose a rice meal photo. Review the highlighted rice and correct its outline before generating.'
+          : widget.autoMask
           ? 'Take a photo of a rice meal and see the requested change. '
-                'The rice is found for you.'
+                'The app finds the rice for you.'
           : 'Take a photo of a rice meal, mark the rice, and see one change '
                 'made to it.',
       style: Theme.of(context).textTheme.bodyLarge,
@@ -384,6 +419,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       ),
       const SizedBox(height: 16),
     ],
+    if (widget.maskReview && _photo != null && _error != null)
+      TextButton(
+        onPressed: _review,
+        child: const Text('Review this photo again'),
+      ),
     const SectionHeading('What should change?'),
     const SizedBox(height: 8),
     RadioGroup<PhotoChange>(
@@ -632,7 +672,12 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _againButton(),
         const SizedBox(height: 8),
       ],
-      if (widget.autoMask && _change.paintable)
+      if (widget.maskReview)
+        TextButton(
+          onPressed: _review,
+          child: const Text('Adjust rice area and try again'),
+        )
+      else if (widget.autoMask && _change.paintable)
         TextButton(
           key: const Key('photo-paint-instead'),
           onPressed: _paintInstead,

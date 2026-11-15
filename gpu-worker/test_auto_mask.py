@@ -80,6 +80,36 @@ class AutoMaskPipelineTests(unittest.TestCase):
             )
         return calls[0]
 
+    def test_preview_segments_without_running_an_editor(self):
+        expected = rice_square()
+        with (
+            mock.patch.object(auto_mask, "find_rice", return_value=(expected, {})),
+            mock.patch.object(gpu_worker, "_run_app_method") as editor,
+        ):
+            result = gpu_worker.preview_rice_mask(self.image)
+        with Image.open(io.BytesIO(base64.b64decode(result["mask_png_base64"]))) as mask:
+            np.testing.assert_array_equal(np.asarray(mask.convert("L")) > 127, expected)
+        editor.assert_not_called()
+
+    def test_reviewed_mask_controls_both_edits_without_redetection(self):
+        chosen = np.zeros((256, 256), bool)
+        chosen[32:152, 48:128] = True
+        expected = chosen.repeat(4, axis=0).repeat(4, axis=1)
+        with (
+            mock.patch.object(auto_mask, "find_rice") as detector,
+            mock.patch.object(gpu_worker, "_run_app_method") as edit,
+        ):
+            gpu_worker.run_photo_pipeline(["brown_rice", "extra_vegetables"],
+                                          self.image, png(Image.fromarray(chosen)), reviewed=True)
+        detector.assert_not_called()
+        masks = edit.call_args.args[2]
+        np.testing.assert_array_equal(masks["brown_rice"], expected)
+        np.testing.assert_array_equal(masks["extra_vegetables"], auto_mask.broccoli_patch(expected))
+
+    def test_review_requires_a_supplied_region(self):
+        with self.assertRaises(gpu_worker.GpuRequestUnsupportedError):
+            gpu_worker.run_photo_pipeline(["brown_rice"], self.image, reviewed=True)
+
     def test_brown_rice_uses_all_the_rice(self):
         masks, ids, painted = self.run_with_rice(["brown_rice"])
         self.assertEqual(ids, ["brown_rice"])

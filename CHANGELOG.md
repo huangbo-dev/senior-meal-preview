@@ -3,6 +3,10 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.7.0 — 2026-11-15
+
+- Review the proposed rice area on a meal photo before generating. Add or erase rice, undo a stroke, or hide the overlay to compare with the original. The rice editor uses the confirmed region and the broccoli editor chooses a placement patch from it.
+
 ## 0.6.0 — 2026-11-15
 
 - **Before/after slider.** Results on My photo and Meals are one picture with a divider you drag

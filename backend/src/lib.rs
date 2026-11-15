@@ -159,6 +159,7 @@ pub struct Capabilities {
     /// `POST /api/v1/photo-preview` works without `mask_png_base64`: the worker finds the rice
     /// itself and can apply two changes to one photo. Additive to schema v1.
     pub auto_mask: bool,
+    pub mask_review: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -238,6 +239,7 @@ fn build_catalog() -> Catalog {
             gpu_preview: false,
             photo_upload: false,
             auto_mask: false,
+            mask_review: false,
         },
         notice: NOTICE,
     }
@@ -596,6 +598,8 @@ pub struct PhotoPreviewRequest {
     pub image_png_base64: String,
     #[serde(default)]
     pub mask_png_base64: Option<String>,
+    #[serde(default)]
+    pub reviewed_rice: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -616,6 +620,40 @@ fn looks_like_png_base64(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct MaskRequest {
+    image_png_base64: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct MaskResult {
+    mask_png_base64: String,
+}
+
+async fn rice_mask(
+    State(config): State<Arc<RuntimeConfig>>,
+    Json(request): Json<MaskRequest>,
+) -> Result<Json<MaskResult>, ApiError> {
+    if !looks_like_png_base64(&request.image_png_base64) {
+        return Err(worker_error(WorkerFailure::BadPhoto));
+    }
+    let worker = config
+        .gpu_worker
+        .as_ref()
+        .ok_or_else(|| worker_error(WorkerFailure::NotReady))?;
+    let result: MaskResult = worker::request_worker(worker, "/v1/rice-mask", &request)
+        .await
+        .map_err(worker_error)?;
+    if !looks_like_png_base64(&result.mask_png_base64) {
+        return Err(worker_error(WorkerFailure::InvalidResponse(
+            "Invalid mask PNG".into(),
+        )));
+    }
+    Ok(Json(result))
 }
 
 async fn photo_preview(
@@ -650,8 +688,14 @@ async fn photo_preview(
         }
     };
     let painted = request.mask_png_base64.is_some();
-    if change_ids.is_empty()
-        || change_ids.len() > if painted { 1 } else { PHOTO_CHANGE_IDS.len() }
+    if (request.reviewed_rice && !painted)
+        || change_ids.is_empty()
+        || change_ids.len()
+            > if painted && !request.reviewed_rice {
+                1
+            } else {
+                PHOTO_CHANGE_IDS.len()
+            }
         || change_ids
             .iter()
             .enumerate()
@@ -705,6 +749,7 @@ async fn photo_preview(
         change_ids,
         image_png_base64: request.image_png_base64,
         mask_png_base64: request.mask_png_base64,
+        reviewed_rice: request.reviewed_rice,
     };
     let artifact = worker::request_gpu_photo_edit(worker_cfg, &payload)
         .await
@@ -764,10 +809,15 @@ pub fn app_with_config(config: RuntimeConfig) -> Router {
                 let mut catalog = catalog_for(ready.gpu_preview);
                 catalog.capabilities.photo_upload = ready.photo_upload;
                 catalog.capabilities.auto_mask = ready.auto_mask;
+                catalog.capabilities.mask_review = ready.mask_review;
                 Json(catalog)
             }),
         )
         .route("/api/v1/preview", post(preview))
+        .route(
+            "/api/v1/rice-mask",
+            post(rice_mask).layer(DefaultBodyLimit::max(MAX_PHOTO_BODY_BYTES)),
+        )
         .route(
             "/api/v1/photo-preview",
             post(photo_preview).layer(DefaultBodyLimit::max(MAX_PHOTO_BODY_BYTES)),

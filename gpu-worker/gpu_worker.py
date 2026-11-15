@@ -428,24 +428,10 @@ def _photo_change_ids(change_ids: object) -> list[str]:
     return [c for c in PHOTO_CHANGE_ORDER if c in change_ids]
 
 
-def run_photo_pipeline(change_ids: object, image_b64: object, mask_b64: object = None) -> dict[str, object]:
-    """Edit a supplied photo. The rice is found automatically unless a painted mask is sent.
-
-    The photo and mask exist only in a per-request temporary directory and are deleted
-    when the request finishes, even when WORKER_RUN_DIR is set: user photos are never
-    retained. Only the rice changes are supported. A painted mask applies to one change;
-    without a mask (app methods only) one or two changes are applied in turn.
-    """
-    change_ids = _photo_change_ids(change_ids)
+def _decode_photo_inputs(Image, image_b64, mask_b64=None):
     painted = mask_b64 is not None
-    if painted and len(change_ids) != 1:
-        raise GpuRequestUnsupportedError("A painted area applies to exactly one change.")
-    if not painted and photo_method() != "app":
-        raise GpuRequestUnsupportedError("Finding the rice automatically needs the app photo methods.")
     image_raw = _decode_png_b64(image_b64, "Photo")
     mask_raw = _decode_png_b64(mask_b64, "Mask") if painted else None
-    research = load_research()
-    np, Image = research.np, research.Image
     mask_img = None
     try:
         image = Image.open(io.BytesIO(image_raw))
@@ -471,6 +457,40 @@ def run_photo_pipeline(change_ids: object, image_b64: object, mask_b64: object =
     # Re-encode from pixels only: this drops EXIF, GPS and any other metadata.
     side = (FIXTURE_SIDE, FIXTURE_SIDE)
     image = image.convert("RGB").resize(side, Image.LANCZOS)
+    return image, mask_img
+
+
+def preview_rice_mask(image_b64):
+    from PIL import Image
+    if photo_method() != "app":
+        raise GpuRequestUnsupportedError("Reviewing rice needs the app photo methods.")
+    image, _ = _decode_photo_inputs(Image, image_b64)
+    rice = _find_rice(image)
+    buf = io.BytesIO()
+    Image.fromarray(rice).save(buf, format="PNG")
+    return {"mask_png_base64": base64.b64encode(buf.getvalue()).decode("ascii")}
+
+
+def run_photo_pipeline(change_ids: object, image_b64: object, mask_b64: object = None, *, reviewed=False) -> dict[str, object]:
+    """Edit a supplied photo. The rice is found automatically unless a painted mask is sent.
+
+    The photo and mask exist only in a per-request temporary directory and are deleted
+    when the request finishes, even when WORKER_RUN_DIR is set: user photos are never
+    retained. Only the rice changes are supported. A painted mask applies to one change;
+    without a mask (app methods only) one or two changes are applied in turn.
+    """
+    change_ids = _photo_change_ids(change_ids)
+    painted = mask_b64 is not None
+    if reviewed and (not painted or photo_method() != "app"):
+        raise GpuRequestUnsupportedError("A reviewed rice mask requires app methods and a mask.")
+    if painted and not reviewed and len(change_ids) != 1:
+        raise GpuRequestUnsupportedError("A painted area applies to exactly one change.")
+    if not painted and photo_method() != "app":
+        raise GpuRequestUnsupportedError("Finding the rice automatically needs the app photo methods.")
+    research = load_research()
+    np, Image = research.np, research.Image
+    image, mask_img = _decode_photo_inputs(Image, image_b64, mask_b64)
+    side = image.size
     if painted:
         mask = np.asarray(mask_img.convert("L").resize(side, Image.NEAREST)) > 127
         coverage = float(mask.mean())
@@ -479,7 +499,7 @@ def run_photo_pipeline(change_ids: object, image_b64: object, mask_b64: object =
                 "Paint over the rice only: the painted area must cover between "
                 f"{MIN_MASK_COVERAGE:.0%} and {MAX_MASK_COVERAGE:.0%} of the photo."
             )
-        masks = {change_ids[0]: mask}
+        masks = _rice_edit_masks(mask, change_ids) if reviewed else {change_ids[0]: mask}
     else:
         masks = _auto_masks(image, change_ids)
         coverage = float(next(iter(masks.values())).mean())
@@ -504,7 +524,7 @@ def run_photo_pipeline(change_ids: object, image_b64: object, mask_b64: object =
         )
 
 
-def _auto_masks(image, change_ids: list[str]) -> dict[str, object]:
+def _find_rice(image):
     """The area each change edits, found without a painted mask.
 
     Brown rice edits all the rice; broccoli goes on one patch inside it.
@@ -522,6 +542,15 @@ def _auto_masks(image, change_ids: list[str]) -> dict[str, object]:
     except Exception as exc:
         raise GpuPipelineUnreadyError(f"Rice finder failed: {type(exc).__name__}: {exc}") from exc
     sys.stderr.write(f"[gpu-worker] auto-mask: {stats}\n")
+    return rice
+
+
+def _auto_masks(image, change_ids):
+    return _rice_edit_masks(_find_rice(image), change_ids)
+
+
+def _rice_edit_masks(rice, change_ids):
+    import auto_mask
     return {
         change_id: rice if change_id == "brown_rice" else auto_mask.broccoli_patch(rice)
         for change_id in change_ids
@@ -860,6 +889,7 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     "worker_mode": self.mode,
                     "gpu_ready": self.mode == "gpu" and is_gpu_pipeline_ready(),
                     "photo_ready": self.mode == "gpu" and is_photo_pipeline_ready(),
+                    "mask_review": True,
                     "auto_mask_ready": self.mode == "gpu" and is_auto_mask_ready(),
                 },
             )
@@ -887,11 +917,13 @@ class WorkerHandler(BaseHTTPRequestHandler):
         except Exception:
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": "invalid_json"})
             return
-        if (
-            not isinstance(data, dict)
-            or set(data) - {"schema_version", "change_id", "change_ids", "image_png_base64", "mask_png_base64"}
-            or ("change_id" in data) == ("change_ids" in data)
-        ):
+        preview = self.path == "/v1/rice-mask"
+        allowed = {"schema_version", "image_png_base64"} if preview else {
+            "schema_version", "change_id", "change_ids", "image_png_base64", "mask_png_base64", "reviewed_rice"
+        }
+        if (not isinstance(data, dict) or set(data) - allowed
+                or not preview and ("change_id" in data) == ("change_ids" in data)
+                or "reviewed_rice" in data and type(data["reviewed_rice"]) is not bool):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_photo_request"})
             return
         if self.mode != "gpu" or os.environ.get("WORKER_GPU_CMD", "").strip():
@@ -902,10 +934,11 @@ class WorkerHandler(BaseHTTPRequestHandler):
             )
             return
         try:
-            artifact = run_photo_pipeline(
+            artifact = preview_rice_mask(data.get("image_png_base64")) if preview else run_photo_pipeline(
                 data["change_ids"] if "change_ids" in data else [data.get("change_id")],
                 data.get("image_png_base64"),
                 data.get("mask_png_base64"),
+                **({"reviewed": True} if data.get("reviewed_rice") else {}),
             )
         except RiceNotFoundError as exc:
             self._send_json(HTTPStatus.CONFLICT, {"error": "rice_not_found", "message": str(exc)})
@@ -928,7 +961,7 @@ class WorkerHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.OK, artifact)
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path == "/v1/generate-photo":
+        if self.path in ("/v1/generate-photo", "/v1/rice-mask"):
             self._handle_photo()
             return
         if self.path != "/v1/generate":
