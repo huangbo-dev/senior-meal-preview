@@ -41,6 +41,17 @@ class BroccoliPatchTests(unittest.TestCase):
         self.assertLessEqual(ys.max() - ys.min(), 0.25 * 1024)
 
 
+class ThinRicePatchTests(unittest.TestCase):
+    def test_a_thin_strip_still_gets_a_usable_patch_close_to_the_rice(self):
+        rice = np.zeros((1024, 1024), bool)
+        rice[500:520, 100:900] = True  # 20 px tall
+        patch = auto_mask.broccoli_patch(rice)
+        self.assertGreater(patch.sum(), 0.004 * rice.size)
+        ys, _ = np.nonzero(patch)
+        self.assertGreater(ys.min(), 500 - 60)
+        self.assertLess(ys.max(), 520 + 60)
+
+
 class AutoMaskPipelineTests(unittest.TestCase):
     def setUp(self):
         self.image = png(Image.new("RGB", (256, 256), "white"))

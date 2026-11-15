@@ -20,12 +20,12 @@ These public reference photographs illustrate sample catalog entries only. They 
 - Thumbnail: https://thumb.wikimedia.org/wikipedia/commons/thumb/9/98/Sliced_fish_soup%2C_Pek_Kio_Market_%26_Food_Centre_%2825065937730%29.jpg/960px-Sliced_fish_soup%2C_Pek_Kio_Market_%26_Food_Centre_%2825065937730%29.jpg
 
 ## tofu_rice.jpg
-- Title: Stir Fried Tofu.jpg
-- Author: PaulMondal
-- Source: https://commons.wikimedia.org/wiki/File:Stir_Fried_Tofu.jpg
-- License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
-- License URL: https://creativecommons.org/licenses/by-sa/4.0/
-- Thumbnail: https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7d/Stir_Fried_Tofu.jpg/960px-Stir_Fried_Tofu.jpg
-- Depicts stir-fried tofu and vegetables only; no rice is visible. Label as a sample tofu reference, not a complete photographed rice meal or a before/after result.
-- Replaced the prior brown-rice photograph after visual verification. No local cropping, retouching, or other image manipulation was performed.
+- Title: 麻婆豆腐配饭 Mapo Tofu with Rice - Dumplings Plus (2953285492).jpg
+- Author: Alpha from Melbourne, Australia
+- Source: https://commons.wikimedia.org/wiki/File:%E9%BA%BB%E5%A9%86%E8%B1%86%E8%85%90%E9%85%8D%E9%A5%AD_Mapo_Tofu_with_Rice_-_Dumplings_Plus_(2953285492).jpg
+- License: Creative Commons Attribution-ShareAlike 2.0 Generic (CC BY-SA 2.0)
+- License URL: https://creativecommons.org/licenses/by-sa/2.0/
+- Thumbnail: https://thumb.wikimedia.org/wikipedia/commons/thumb/6/64/%E9%BA%BB%E5%A9%86%E8%B1%86%E8%85%90%E9%85%8D%E9%A5%AD_Mapo_Tofu_with_Rice_-_Dumplings_Plus_%282953285492%29.jpg/960px-%E9%BA%BB%E5%A9%86%E8%B1%86%E8%85%90%E9%85%8D%E9%A5%AD_Mapo_Tofu_with_Rice_-_Dumplings_Plus_%282953285492%29.jpg
+- Downloaded 2026-11-15. Replaces "Stir Fried Tofu.jpg" (PaulMondal, CC BY-SA 4.0), which showed no rice, so no picture could be made for this meal.
+- Depicts mapo tofu with steamed white rice. No local cropping, retouching, or other manipulation of the stored file. The app's edited pictures of it are adaptations and carry the same licence.
 - Preserve attribution and license notices when distributing. Adaptations of this photograph must use the same or a compatible license.

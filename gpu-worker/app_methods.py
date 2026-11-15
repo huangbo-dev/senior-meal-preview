@@ -18,12 +18,15 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_dilation, gaussian_filter
 
-METHOD_VERSION = "app-v2"
+METHOD_VERSION = "app-v3"
 
 # Cooked brown rice as a CIELAB (L*, a*, b*) target for the median rice pixel, and the gain on
-# lightness differences (bran makes single grains stand out a little more than polished rice).
-BROWN_RICE_LAB = (56.0, 11.0, 29.0)
-BROWN_RICE_GAIN = 1.35
+# lightness differences (bran makes single grains stand out more than on polished rice).
+# Chosen on 15 dev rice photos of the CE7454 bundle on 15 Nov 2026, using the checker's pass rate
+# as a guide (2/15 for the earlier (56, 11, 29, 1.35), 6/15 for these) and by eye. That is a
+# development choice, not an evaluation; see docs/RICE_FINDER_EVAL.md.
+BROWN_RICE_LAB = (40.0, 8.0, 24.0)
+BROWN_RICE_GAIN = 1.7
 # How far a pixel may differ from the median rice pixel and still carry that difference into the
 # result: (darker L*, lighter L*, a*/b* either way). Rice that is much whiter than the rest, such
 # as grains an image model drew next to added broccoli, would otherwise stay pale.

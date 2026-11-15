@@ -165,6 +165,9 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   final List<Stroke> _strokes = [];
   int _revision = 0;
   bool _bigBrush = true;
+
+  /// The finger that is painting; a second finger is ignored.
+  int? _paintPointer;
   bool _preparing = false;
   String? _error;
   PhotoEditResult? _result;
@@ -454,9 +457,22 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
               },
               child: Listener(
                 key: const Key('paint-area'),
-                onPointerDown: (e) =>
-                    _addPoint(e.localPosition, side, start: true),
-                onPointerMove: (e) => _addPoint(e.localPosition, side),
+                onPointerDown: (e) {
+                  if (_paintPointer != null) return;
+                  _paintPointer = e.pointer;
+                  _addPoint(e.localPosition, side, start: true);
+                },
+                onPointerMove: (e) {
+                  if (e.pointer == _paintPointer) {
+                    _addPoint(e.localPosition, side);
+                  }
+                },
+                onPointerUp: (e) {
+                  if (e.pointer == _paintPointer) _paintPointer = null;
+                },
+                onPointerCancel: (e) {
+                  if (e.pointer == _paintPointer) _paintPointer = null;
+                },
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -577,30 +593,19 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     final edited = base64Decode(
       result.artifact.imageDataUrl.substring('data:image/png;base64,'.length),
     );
-    Widget labelled(String label, Uint8List bytes, String semantics) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.notice),
-          child: AspectRatio(
-            aspectRatio: 1,
-            child: Image.memory(
-              bytes,
-              fit: BoxFit.cover,
-              semanticLabel: semantics,
-            ),
-          ),
-        ),
-      ],
-    );
     return [
       StepHeading(_change.label),
+      const SizedBox(height: 6),
+      Text(
+        'Drag across the photo to compare before and after.',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
       const SizedBox(height: 12),
-      labelled('Before', _photo!, 'Your original photo'),
-      const SizedBox(height: 16),
-      labelled('After', edited, result.artifact.generatedLabel),
+      BeforeAfterSlider(
+        before: Image.memory(_photo!, fit: BoxFit.cover, gaplessPlayback: true),
+        after: Image.memory(edited, fit: BoxFit.cover, gaplessPlayback: true),
+        afterLabel: result.artifact.generatedLabel,
+      ),
       const SizedBox(height: 10),
       Text(
         result.artifact.generatedLabel,

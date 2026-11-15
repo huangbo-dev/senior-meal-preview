@@ -299,7 +299,7 @@ class MealArtwork extends StatelessWidget {
     filterQuality: FilterQuality.high,
     width: double.infinity,
     semanticLabel:
-        'Reference photo of ${dish.id == 'tofu_rice' ? 'tofu and vegetables' : dish.name}. Not a meal-preview result.',
+        'Reference photo of ${dish.name}. Not a meal-preview result.',
     errorBuilder: (context, error, stackTrace) => ColoredBox(
       color: AppColors.surfaceSubtle,
       child: Center(
@@ -796,4 +796,111 @@ class GpuPreviewCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One square picture with a draggable divider: the left part shows
+/// [before], the right part [after]. Labels sit in the top corners.
+class BeforeAfterSlider extends StatefulWidget {
+  const BeforeAfterSlider({
+    super.key,
+    required this.before,
+    required this.after,
+    required this.afterLabel,
+  });
+
+  final Widget before;
+  final Widget after;
+
+  /// Read out for the edited picture, e.g. its provenance label.
+  final String afterLabel;
+
+  @override
+  State<BeforeAfterSlider> createState() => _BeforeAfterSliderState();
+}
+
+class _BeforeAfterSliderState extends State<BeforeAfterSlider> {
+  double _split = 0.5;
+
+  static String _percent(double split) =>
+      '${(split * 100).round()} percent before';
+
+  void _move(double dx, double width) =>
+      setState(() => _split = (dx / width).clamp(0.0, 1.0));
+
+  Widget _tag(String text) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.6),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(text, style: AppTypography.style(15, color: Colors.white)),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final side = constraints.maxWidth;
+      return Semantics(
+        label: 'Before and after. ${widget.afterLabel}',
+        slider: true,
+        value: _percent(_split),
+        increasedValue: _percent((_split + 0.1).clamp(0, 1)),
+        decreasedValue: _percent((_split - 0.1).clamp(0, 1)),
+        onIncrease: () => setState(() => _split = (_split + 0.1).clamp(0, 1)),
+        onDecrease: () => setState(() => _split = (_split - 0.1).clamp(0, 1)),
+        child: GestureDetector(
+          key: const Key('before-after'),
+          onHorizontalDragUpdate: (d) => _move(d.localPosition.dx, side),
+          onTapDown: (d) => _move(d.localPosition.dx, side),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox.square(
+              dimension: side,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  widget.after,
+                  ClipRect(clipper: _LeftPart(_split), child: widget.before),
+                  Positioned(
+                    left: side * _split - 1.5,
+                    top: 0,
+                    bottom: 0,
+                    child: const SizedBox(
+                      width: 3,
+                      child: ColoredBox(color: Colors.white),
+                    ),
+                  ),
+                  Positioned(
+                    left: side * _split - 18,
+                    top: side / 2 - 18,
+                    child: const CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.white,
+                      child: Icon(Icons.compare_arrows, size: 22),
+                    ),
+                  ),
+                  Positioned(left: 8, top: 8, child: _tag('Before')),
+                  Positioned(right: 8, top: 8, child: _tag('After')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _LeftPart extends CustomClipper<Rect> {
+  _LeftPart(this.split);
+  final double split;
+
+  @override
+  Rect getClip(Size size) =>
+      Rect.fromLTWH(0, 0, size.width * split, size.height);
+
+  @override
+  bool shouldReclip(_LeftPart old) => old.split != split;
 }

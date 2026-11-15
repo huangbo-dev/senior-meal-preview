@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:senior_meal_preview/main.dart';
 import 'package:senior_meal_preview/photo_flow.dart';
+import 'package:senior_meal_preview/picture_store.dart';
 
 import 'widget_test.dart' show FakeApi, fakeCameraPng, selectMeal, tapKey;
 
@@ -324,7 +325,7 @@ void main() {
     expect(find.textContaining('No picture'), findsNothing);
     expect(find.textContaining('not reviewed by a person'), findsOneWidget);
     expect(find.byKey(const Key('picture-not-shown')), findsOneWidget);
-    expect(find.text('Reference photo · Unchanged'), findsOneWidget);
+    expect(find.byKey(const Key('before-after')), findsOneWidget);
   });
 
   testWidgets('Meals review falls back to the honest summary when no picture '
@@ -347,4 +348,72 @@ void main() {
     expect(find.byKey(const Key('meal-picture')), findsNothing);
     expect(find.textContaining('No picture'), findsWidgets);
   });
+
+  testWidgets('a meal picture is saved and shown again at once, and a new '
+      'one can be asked for', (tester) async {
+    final api = FakeApi()..autoMask = true;
+    final store = MemoryPictureStore();
+    tester.view.physicalSize = const Size(390, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    Future<void> review() async {
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals, pictures: store),
+      );
+      await tester.pumpAndSettle();
+      await selectMeal(tester);
+      await tapKey(tester, 'change-brown_rice');
+      await tester.tap(find.byKey(const Key('submit')));
+      await tester.pump();
+      await _pumpUntil(tester, find.byKey(const Key('meal-picture')));
+    }
+
+    await review();
+    expect(api.photoCalls, 1);
+    expect(find.byKey(const Key('picture-saved')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await review();
+    expect(api.photoCalls, 1, reason: 'the saved picture is reused');
+    expect(find.byKey(const Key('picture-saved')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('picture-new')));
+    await tester.pump();
+    for (var i = 0; i < 50 && api.photoCalls < 2; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    expect(api.photoCalls, 2);
+  });
+
+  testWidgets(
+    'a saved meal picture is shown even while the server is failing',
+    (tester) async {
+      final api = FakeApi()..autoMask = true;
+      final store = MemoryPictureStore();
+      tester.view.physicalSize = const Size(390, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals, pictures: store),
+      );
+      await tester.pumpAndSettle();
+      await selectMeal(tester);
+      await tapKey(tester, 'change-brown_rice');
+      await tester.tap(find.byKey(const Key('submit')));
+      await tester.pump();
+      await _pumpUntil(tester, find.byKey(const Key('meal-picture')));
+      api.photoError = 'Another picture is being made right now.';
+      await tester.ensureVisible(find.byKey(const Key('meal-picture')));
+      // No saved notice yet, so ask again through the review step's own flow.
+      await tester.tap(find.byKey(const Key('edit')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('submit')));
+      await tester.pump();
+      await _pumpUntil(tester, find.byKey(const Key('picture-saved')));
+      expect(find.byKey(const Key('meal-picture')), findsOneWidget);
+    },
+  );
 }
