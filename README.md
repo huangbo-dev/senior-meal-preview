@@ -1,33 +1,37 @@
-# SG Food Edit — Android debug APKs (0.4.1)
+# SG Food Edit — Android debug APKs (0.5.0)
 
-Built on 2026-11-13 from source commit `d818a1e` (branch `feat/own-photo-home-20261114`, which is `main` at `cd9cd22` plus one commit; not pushed) with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-15 from source commit `0242ff9` (branch `feat/auto-mask-20261115`, which is `main` at `cd9cd22` plus two commits; not pushed) with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 Spark02 is aarch64 and Gradle's aapt2 is x86_64, so the build also passes
 `--android-project-arg=android.aapt2FromMavenOverride=$HOME/toolchains/qemu/aapt2` (runs it under QEMU).
 
 | File | For |
 | --- | --- |
-| `sg-food-edit-0.4.1-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
-| `sg-food-edit-0.4.1-debug-x86_64.apk` | x86_64 emulators |
+| `sg-food-edit-0.5.0-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
+| `sg-food-edit-0.5.0-debug-x86_64.apk` | x86_64 emulators |
 
 Checksums are in `SHA256SUMS`. Earlier APKs are in this branch's history. Do not use 0.3.0 (built without the meal photos) or 0.4.0 (published briefly without the tab bar).
 
 ## What's in this build
 
-Version **0.4.1** (Android versionCode 2006 on arm64, 4006 on x86_64; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
+Version **0.5.0** (Android versionCode 2007 on arm64, 4007 on x86_64; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
 
-- **New in 0.4.1:** the app opens on **My photo**, now the first tab; the sample meals are the
+- **New in 0.5.0:** no more painting. Choose a change and a photo and the app finds the rice by
+  itself. A third choice does both changes at once (brown rice with broccoli). On **Meals**,
+  choosing brown rice or added vegetables now shows the meal's photo with that change made,
+  instead of "No picture generated". If the rice cannot be found you are asked to paint it.
+  The rice finder was set up by eye on five photos; it is a best guess and can be wrong.
+- **From 0.4.1:** the app opens on **My photo**, the first tab; the sample meals are the
   second tab. The back button on Meals or About returns to My photo.
 - **From 0.3.2:** a bottom tab bar (My photo · Meals · About) with each screen's main button
   pinned above it; About is now a tab. Plainer error messages, which no longer suggest
   "Summary only" on the photo screen. The recoloured brown-rice result no longer carries an
   "Experimental AI edit" notice next to its "Not AI-generated" label.
 - **My photo** (the first tab): take or choose a photo of a rice meal, pick
-  "brown rice" or "add broccoli", paint the area, and get the edited photo back beside the original.
+  "brown rice", "add broccoli" or both, and get the edited photo back beside the original.
   For the project team only.
-  - *Brown rice* recolours your own rice (no AI image model), about 3 s. Paint the rice only:
-    a white plate under the brush is tinted too.
-  - *Add broccoli* places broccoli on one small painted patch with an AI image model, about 11 s
+  - *Brown rice* recolours all the rice in the photo (no AI image model), about 4 s.
+  - *Add broccoli* places broccoli on one patch of the rice with an AI image model, about 11 s
     per attempt, up to a minute for a hard one.
   - The waiting screen shows a progress bar and the seconds so far. The bar is an estimate.
   - These two methods were chosen by eye on one public photo. They are not the CE7454 research
