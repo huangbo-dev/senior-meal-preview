@@ -109,8 +109,8 @@ def recolour_rice(image: Image.Image, mask: np.ndarray) -> Image.Image:
     out[..., 1] = BROWN_RICE_LAB[1] + np.clip(lab[..., 1] - centre[1], -chroma, chroma)
     out[..., 2] = BROWN_RICE_LAB[2] + np.clip(lab[..., 2] - centre[2], -chroma, chroma)
     rice_like = np.clip((lab[..., 0] - (centre[0] - 30)) / 15, 0, 1)
-    near = binary_dilation(mask, _disk(6))
-    weight = np.clip(gaussian_filter(mask.astype("float64"), 2.5), 0, 1) * np.where(near, rice_like, 0)
+    # Feather inward: a light plate next to the rice can pass the colour gate.
+    weight = gaussian_filter(mask.astype("float64"), 2.5) * np.where(mask, rice_like, 0)
     weight = weight[..., None]
     mixed = weight * lab_to_rgb(out).astype("float64") + (1 - weight) * rgb
     return Image.fromarray(np.clip(np.rint(mixed), 0, 255).astype("uint8"))

@@ -27,6 +27,15 @@ class RecolourTest(unittest.TestCase):
         mask[80:176, 80:176] = True
         return Image.fromarray(rgb), mask
 
+    def test_white_plate_and_hole_remain_exactly_unchanged(self):
+        image = Image.new("RGB", (96, 96), (238, 238, 238))
+        mask = np.zeros((96, 96), bool)
+        mask[20:76, 20:76] = True
+        mask[40:50, 40:50] = False
+        changed = (np.asarray(app_methods.recolour_rice(image, mask)) != np.asarray(image)).any(2)
+        self.assertFalse(changed[~mask].any())
+        self.assertTrue(changed[30, 30])
+
     def test_lab_round_trip(self):
         rgb = np.random.default_rng(1).integers(0, 256, (16, 16, 3)).astype("uint8")
         back = app_methods.lab_to_rgb(app_methods.rgb_to_lab(rgb))
