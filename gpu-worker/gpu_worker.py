@@ -94,6 +94,10 @@ class GpuPipelineUnreadyError(RuntimeError):
     """Raised when `--mode gpu` is active but GPU fixtures or weights are unavailable."""
 
 
+class GpuBusyError(RuntimeError):
+    """Another HTTP request still owns the GPU worker (HTTP 429)."""
+
+
 class PhotoRequestError(ValueError):
     """Raised when an uploaded photo or mask is malformed (HTTP 400)."""
 
@@ -103,6 +107,7 @@ class GpuRequestUnsupportedError(RuntimeError):
 
 
 _GPU_LOCK = threading.Lock()  # one generation at a time on the single editor
+_REQUEST_LOCK = threading.Lock()  # reject overlapping HTTP jobs instead of queueing stale work
 _EDITOR = None
 
 
@@ -781,11 +786,14 @@ class WorkerHandler(BaseHTTPRequestHandler):
             )
             return
         try:
-            artifact = run_photo_pipeline(
-                data.get("change_id"), data.get("image_png_base64"), data.get("mask_png_base64")
+            artifact = self._run_admitted(
+                run_photo_pipeline, data.get("change_id"), data.get("image_png_base64"), data.get("mask_png_base64")
             )
         except PhotoRequestError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_photo", "message": str(exc)})
+            return
+        except GpuBusyError:
+            self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "gpu_busy"})
             return
         except GpuRequestUnsupportedError as exc:
             self._send_json(
@@ -800,6 +808,18 @@ class WorkerHandler(BaseHTTPRequestHandler):
             )
             return
         self._send_json(HTTPStatus.OK, artifact)
+
+    def _run_admitted(self, operation, *args, **kwargs):
+        # Called after bounded input parsing: a slow upload cannot hold this lock.
+        # This stays held until inference ends even if the upstream gateway times out.
+        if not _REQUEST_LOCK.acquire(blocking=False):
+            raise GpuBusyError()
+        started = time.monotonic()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            _REQUEST_LOCK.release()
+            self.log_message("elapsed_seconds=%.3f", time.monotonic() - started)
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/v1/generate-photo":
@@ -826,16 +846,22 @@ class WorkerHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": "invalid_json"})
             return
 
+        if not isinstance(data, dict):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_selection"})
+            return
         dish_id = data.get("dish_id")
         change_ids = data.get("change_ids")
         texture = data.get("texture", "any")
         flavour = data.get("flavour", "any")
         if (
-            dish_id not in ALLOWED_DISHES
+            not isinstance(dish_id, str)
+            or dish_id not in ALLOWED_DISHES
             or not isinstance(change_ids, list)
             or not (1 <= len(change_ids) <= 2)
-            or any(cid not in ALLOWED_CHANGES for cid in change_ids)
+            or any(not isinstance(cid, str) or cid not in ALLOWED_CHANGES for cid in change_ids)
+            or not isinstance(texture, str)
             or texture not in ALLOWED_TEXTURES
+            or not isinstance(flavour, str)
             or flavour not in ALLOWED_FLAVOURS
         ):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_selection"})
@@ -853,14 +879,17 @@ class WorkerHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            artifact = run_gpu_pipeline(
-                dish_id=dish_id,
+            artifact = self._run_admitted(
+                run_gpu_pipeline, dish_id=dish_id,
                 change_ids=change_ids,
                 texture=texture,
                 flavour=flavour,
                 prompt_id=prompt_id,
                 seed=seed,
             )
+        except GpuBusyError:
+            self._send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "gpu_busy"})
+            return
         except GpuRequestUnsupportedError as exc:
             self._send_json(
                 HTTPStatus.UNPROCESSABLE_ENTITY,

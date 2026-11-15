@@ -467,6 +467,7 @@ async fn send_worker_http(
         200..300 => {}
         400 => return Err(WorkerFailure::BadPhoto),
         422 => return Err(WorkerFailure::Unsupported),
+        429 => return Err(WorkerFailure::Busy),
         503 => return Err(WorkerFailure::NotReady),
         _ => {
             return Err(WorkerFailure::Unreachable(format!(

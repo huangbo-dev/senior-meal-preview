@@ -518,6 +518,11 @@ async fn worker_refusals_are_reported_truthfully_not_as_outages() {
 
     for (worker_status, api_status, code) in [
         (
+            "429 Too Many Requests",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "gpu_busy",
+        ),
+        (
             "422 Unprocessable Entity",
             StatusCode::UNPROCESSABLE_ENTITY,
             "gpu_unsupported_request",
@@ -974,4 +979,22 @@ async fn catalog_advertises_photo_upload_separately_from_dish_previews() {
         assert_eq!(value["capabilities"]["photo_upload"], photo, "{health}");
         assert!(task.await.unwrap().starts_with("GET /healthz"));
     }
+}
+
+#[tokio::test]
+async fn photo_preview_reports_worker_busy_without_details() {
+    let (port, task) = mock_worker(
+        "429 Too Many Requests",
+        r#"{"error":"gpu_busy","message":"internal detail"}"#.into(),
+    )
+    .await;
+    let (status, value) = post_photo(
+        photo_app(Some(port)),
+        json!({"change_id": "brown_rice", "image_png_base64": photo_b64(64), "mask_png_base64": photo_b64(64)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(value["error"]["code"], "gpu_busy");
+    assert!(!value.to_string().contains("internal detail"));
+    task.await.unwrap();
 }
