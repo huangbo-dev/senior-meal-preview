@@ -37,7 +37,7 @@ void main() {
               'schema_version': 1,
               'edit_target': change,
               'edit_targets': [change],
-              'notices': [],
+              'notices': <String>[],
               'gpu_artifact': artifact,
             }),
             200,
