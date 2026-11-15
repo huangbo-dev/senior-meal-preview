@@ -3,6 +3,21 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.6.0 — 2026-11-15
+
+- **Before/after slider.** Results on My photo and Meals are one picture with a divider you drag
+  to compare. On Meals the "before" photo now has the same square framing as the edited one.
+- **Meals pictures are saved on the phone.** Asking for the same meal and changes again shows
+  the saved picture at once, with the date it was made, and "Make a new picture" asks the server
+  again. If a new one cannot be made, the saved one is shown. Photos you take are never saved.
+- **Progress bar on Meals** while a picture is being made, as on My photo.
+- **Tofu rice has a new reference photo** (mapo tofu with rice, CC BY-SA 2.0), so it can show a
+  picture too. The old photo showed no rice.
+- **Browner brown rice.** The recolour target is darker. On held-out photos it reads more as brown
+  rice to the checker but scores lower on realism; see docs/RICE_FINDER_EVAL.md.
+- Broccoli patches have a minimum size, so a thin strip of rice still gets visible florets.
+- A second finger on the photo no longer paints.
+
 ## 0.5.0 — 2026-11-15
 
 - **No more painting.** On My photo, choose a change and a photo: the app finds the rice by itself

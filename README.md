@@ -1,22 +1,25 @@
-# SG Food Edit — Android debug APKs (0.5.0)
+# SG Food Edit — Android debug APKs (0.6.0)
 
-Built on 2026-11-15 from source commit `0242ff9` (branch `feat/auto-mask-20261115`, which is `main` at `cd9cd22` plus two commits; not pushed) with Flutter 3.44.8 / Dart 3.12.2
+Built on 2026-11-15 from source commit `3ee0e52` (branch `main` and `feat/auto-mask-20261115`, pushed) with Flutter 3.44.8 / Dart 3.12.2
 (`flutter build apk --debug --split-per-abi` with `API_BASE_URL` and `API_AUTH_TOKEN` defines).
 Spark02 is aarch64 and Gradle's aapt2 is x86_64, so the build also passes
 `--android-project-arg=android.aapt2FromMavenOverride=$HOME/toolchains/qemu/aapt2` (runs it under QEMU).
 
 | File | For |
 | --- | --- |
-| `sg-food-edit-0.5.0-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
-| `sg-food-edit-0.5.0-debug-x86_64.apk` | x86_64 emulators |
+| `sg-food-edit-0.6.0-debug-arm64-v8a.apk` | arm64 phones and arm64 emulators |
+| `sg-food-edit-0.6.0-debug-x86_64.apk` | x86_64 emulators |
 
 Checksums are in `SHA256SUMS`. Earlier APKs are in this branch's history. Do not use 0.3.0 (built without the meal photos) or 0.4.0 (published briefly without the tab bar).
 
 ## What's in this build
 
-Version **0.5.0** (Android versionCode 2007 on arm64, 4007 on x86_64; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
+Version **0.6.0** (Android versionCode 2008 on arm64, 4008 on x86_64; shown in the app under **About**). Full history is in [CHANGELOG.md](CHANGELOG.md).
 
-- **New in 0.5.0:** no more painting. Choose a change and a photo and the app finds the rice by
+- **New in 0.6.0:** a before/after slider; Meals pictures are saved on the phone and shown
+  again at once ("Make a new picture" asks again); a progress bar on Meals; tofu rice has a
+  photo with rice; darker brown rice. See CHANGELOG.md.
+- **From 0.5.0:** no more painting. Choose a change and a photo and the app finds the rice by
   itself. A third choice does both changes at once (brown rice with broccoli). On **Meals**,
   choosing brown rice or added vegetables now shows the meal's photo with that change made,
   instead of "No picture generated". If the rice cannot be found you are asked to paint it.
@@ -31,6 +34,7 @@ Version **0.5.0** (Android versionCode 2007 on arm64, 4007 on x86_64; shown in t
   "brown rice", "add broccoli" or both, and get the edited photo back beside the original.
   For the project team only.
   - *Brown rice* recolours all the rice in the photo (no AI image model), about 4 s.
+  - Drag across the result to compare before and after.
   - *Add broccoli* places broccoli on one patch of the rice with an AI image model, about 11 s
     per attempt, up to a minute for a hard one.
   - The waiting screen shows a progress bar and the seconds so far. The bar is an estimate.
