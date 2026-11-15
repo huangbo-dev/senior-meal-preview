@@ -41,6 +41,7 @@ class FakeApi implements MealApi {
   Completer<Catalog>? pendingCatalog;
   bool photoUpload = true;
   bool autoMask = false;
+  bool checkerPassed = true;
   int photoCalls = 0;
   String? photoError;
   String? photoErrorCode;
@@ -76,7 +77,7 @@ class FakeApi implements MealApi {
         'prompt_id': 'sgedit-v1:tuned:T2/rice:ladder0:g7.5',
         'seed': 1,
         'attempts': 2,
-        'checker_passed': true,
+        'checker_passed': checkerPassed,
         'image_data_url': 'data:image/png;base64,$tinyPngB64',
         'generated_label':
             'Experimental AI edit of your photo, not reviewed by a person',
@@ -139,7 +140,7 @@ class FakeApi implements MealApi {
         'prompt_id': 't2_r1_hawker',
         'seed': 7,
         'attempts': 2,
-        'checker_passed': true,
+        'checker_passed': checkerPassed,
         'image_data_url':
             'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
         'generated_label':

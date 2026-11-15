@@ -742,6 +742,27 @@ class RequestSummary extends StatelessWidget {
   );
 }
 
+/// Visible beside each returned image, including a candidate the worker rejected.
+class EditVerdict extends StatelessWidget {
+  const EditVerdict({super.key, required this.artifact});
+  final GpuArtifact artifact;
+
+  @override
+  Widget build(BuildContext context) {
+    if (artifact.provider == 'tailscale-gpu-dry-run') {
+      return const NoticeCard(
+        'Test fixture. No automatic check ran on this image.',
+      );
+    }
+    return NoticeCard(
+      artifact.checkerPassed
+          ? 'The automatic check passed. Judge the edit against the original meal.'
+          : 'The automatic check failed. The image below is the attempted edit.',
+      error: !artifact.checkerPassed,
+    );
+  }
+}
+
 /// Displays an optional GPU worker preview returned over Tailscale, with full
 /// model/prompt/attempt provenance and mandatory non-clinical disclosure.
 class GpuPreviewCard extends StatelessWidget {
@@ -769,6 +790,8 @@ class GpuPreviewCard extends StatelessWidget {
             'Generated preview',
             style: Theme.of(context).textTheme.titleLarge,
           ),
+          const SizedBox(height: 10),
+          EditVerdict(artifact: artifact),
           const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadius.notice),

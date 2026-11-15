@@ -2,6 +2,10 @@
 
 **A separate, non-submission app.** This is a working Rust API and Flutter client for rehearsing preference-led meal changes. It lives in its own repository and does not modify any CE7454 coursework files (`sgedit/`, `evaluate/`, `study/`, `report/`, `plan/`, `calib/`, `bench/`); the optional GPU worker only reads the coursework `sgedit` package from the checkout named by `WORKER_SGEDIT_ROOT`.
 
+## Presentation
+
+The [presentation review and run instructions](docs/SHOWCASE_REVIEW.md) cover a saved chicken-rice colour edit, a real Spark retry failure, and a local walkthrough of the meal-choice flow.
+
 ## Own-photo flow (0.5.0)
 The camera/gallery flow in mobile/lib/photo_flow.dart crops and re-encodes a
 rice-meal photo and calls POST /api/v1/photo-preview without a mask: the worker

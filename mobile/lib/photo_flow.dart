@@ -366,7 +366,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     const SizedBox(height: 8),
     Text(
       widget.autoMask
-          ? 'Take a photo of a rice meal and see a healthier version of it. '
+          ? 'Take a photo of a rice meal and see the requested change. '
                 'The rice is found for you.'
           : 'Take a photo of a rice meal, mark the rice, and see one change '
                 'made to it.',
@@ -600,7 +600,13 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       const SizedBox(height: 12),
       labelled('Before', _photo!, 'Your original photo'),
       const SizedBox(height: 16),
-      labelled('After', edited, result.artifact.generatedLabel),
+      EditVerdict(artifact: result.artifact),
+      const SizedBox(height: 8),
+      labelled(
+        result.artifact.checkerPassed ? 'After' : 'Attempted edit',
+        edited,
+        result.artifact.generatedLabel,
+      ),
       const SizedBox(height: 10),
       Text(
         result.artifact.generatedLabel,

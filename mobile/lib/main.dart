@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'api.dart';
 import 'models.dart';
 import 'photo_flow.dart';
+import 'showcase.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -28,7 +29,25 @@ class MealPreviewApp extends StatelessWidget {
     title: 'SG Food Edit',
     debugShowCheckedModeBanner: false,
     theme: buildAppTheme(),
-    home: MealFlow(api: api, initialTab: initialTab),
+    home: const bool.fromEnvironment('MEAL_SHOWCASE')
+        ? Builder(
+            builder: (context) => ShowcasePage(
+              openMealApp: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (routeContext) => Scaffold(
+                    appBar: AppBar(
+                      title: const Text('Meal choices'),
+                      leading: BackButton(
+                        onPressed: () => Navigator.pop(routeContext),
+                      ),
+                    ),
+                    body: MealFlow(api: api, initialTab: AppTab.meals),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : MealFlow(api: api, initialTab: initialTab),
   );
 }
 
@@ -905,7 +924,7 @@ class _MealFlowState extends State<MealFlow> {
           PreferenceGroup(
             title: 'Preview mode',
             helper:
-                'AI preview makes a picture from a stock meal photo. If it fails, no picture is shown.',
+                'AI preview edits a stock meal photo. Check the result to see whether the requested change passed.',
             enabled: !_submitting,
             options: [
               PreferenceOption(
@@ -1019,10 +1038,14 @@ class _MealFlowState extends State<MealFlow> {
       ),
       const SizedBox(height: 12),
       Text(
-        'How ${preview.dish.name.toLowerCase()} could look with your changes',
+        shown.checkerPassed
+            ? 'How ${preview.dish.name.toLowerCase()} could look with your changes'
+            : 'Inspect the attempted edit of ${preview.dish.name.toLowerCase()}.',
         style: Theme.of(context).textTheme.bodyMedium,
       ),
       const SizedBox(height: 16),
+      EditVerdict(artifact: shown),
+      const SizedBox(height: 12),
       ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: AspectRatio(

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SG Food Edit · Meal edit walkthrough</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f7f7f1;color:#222d26;font:17px/1.45 system-ui,sans-serif}
+header{border-bottom:1px solid #ccd2c6;padding:14px max(5vw,20px);font-weight:700;color:#245642}
+main{max-width:1160px;margin:auto;padding:clamp(18px,4vw,48px) 24px}h1{font:500 clamp(34px,5vw,58px)/1.08 Georgia,serif;margin:0 0 10px}
+h2{font:500 clamp(25px,3vw,34px)/1.12 Georgia,serif;margin:0 0 8px}p{margin:0 0 16px;max-width:63ch}
+nav,.controls{display:flex;flex-wrap:wrap;gap:8px}nav{margin:20px 0;border-bottom:1px solid #c5cdc1;padding-bottom:18px}
+button{border:1px solid #829083;background:white;color:inherit;border-radius:7px;padding:10px 14px;font:inherit;cursor:pointer}
+button[aria-pressed=true]{background:#245642;border-color:#245642;color:white}button:focus-visible{outline:3px solid #b15a22;outline-offset:3px}
+section{display:grid;grid-template-columns:minmax(180px,.9fr) minmax(0,2fr);gap:24px;align-items:start}
+.photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}figure{margin:0}img{display:block;width:100%;aspect-ratio:1;object-fit:contain;border-radius:12px}figcaption{padding:7px 0;font-weight:650}
+footer{margin-top:20px;font-size:14px;color:#415147}a{color:#245642}#description{color:#44574a}
+@media(max-width:780px){section{grid-template-columns:1fr;gap:12px}main{padding:20px 14px}.photos{gap:6px}}
+</style>
+<header>SG Food Edit</header><main>
+<h1>Meal edit walkthrough</h1><p>Compare a local rice colour edit with a recorded two-attempt Spark run. Both examples work offline.</p>
+<nav aria-label="Choose a meal"><button id="chicken" aria-pressed="true">Chicken rice</button><button id="tofu" aria-pressed="false">Tofu rice</button></nav>
+<section><div><h2 id="question"></h2><p id="description"></p><div class="controls" aria-label="Comparison view"><button id="first"></button><button id="second"></button></div></div>
+<div class="photos"><figure><img id="original" alt=""><figcaption>Original meal</figcaption></figure><figure><img id="detail" alt=""><figcaption id="caption" aria-live="polite"></figcaption></figure></div></section>
+<footer><p id="method"></p><p id="credit"></p></footer></main>
+<script>
+const photos=PHOTO_DATA;
+const cases=[
+ {title:'How would brown rice look?',description:'The app changes the colour of the marked rice and retains the photographed grain shapes. Inspect the region to see how much of the result depends on the mask.',
+ buttons:['Rice region','Colour edit'],names:['Hand-marked rice','Recoloured rice'],images:['original','region','edited'],
+ method:'Local app-method replay. The CIELAB colour transfer used a hand-drawn mask. This example has no automatic segmentation or Qwen verdict.',
+ author:'Misaochan',titleCredit:'Hainanese chicken rice',source:'https://commons.wikimedia.org/wiki/File:Hainanese_chicken_rice.jpg',lic:'4.0',changes:'Cropped, marked and recoloured.'},
+ {title:'What did the retry change?',description:'BrushNet regenerated a small rice patch twice. Both candidates introduced an object that looks pasted onto the meal. Qwen rejected the requested edit in both.',
+ buttons:['Attempt 1','Attempt 2'],names:['Attempt 1 · Selected by score, failed','Attempt 2 · Failed'],images:['tofu_0','tofu_1','tofu_2'],
+ method:'Recorded Spark 02 fixture run. A second API call also returned two attempts and a failed check in 24.58 seconds. The photo includes fish cake.',
+ author:'Walter Lim',titleCredit:'Teochew rice with vegetables, fish cake and tofu',source:'https://commons.wikimedia.org/wiki/File:Teochew_rice_with_vegetables,_fish_cake_and_tofu_-healthy_-lunch_(8351561669).jpg',lic:'2.0',changes:'Resized, cropped and edited.'}
+];
+const el=id=>document.getElementById(id);let meal=0,view=1;
+function render(){
+ const c=cases[meal];
+ for(const [id,t] of Object.entries({question:c.title,description:c.description,first:c.buttons[0],second:c.buttons[1],caption:c.names[view],method:c.method}))el(id).textContent=t;
+ for(const [id,pressed] of Object.entries({chicken:meal===0,tofu:meal===1,first:view===0,second:view===1}))el(id).setAttribute('aria-pressed',String(pressed));
+ el('original').src=photos[c.images[0]];el('original').alt='Original '+(meal?'tofu, fish cake and rice':'chicken rice')+' meal';
+ el('detail').src=photos[c.images[view+1]];el('detail').alt=c.names[view];
+ const source=document.createElement('a'),license=document.createElement('a');
+ source.href=c.source;source.textContent=c.titleCredit;license.href='https://creativecommons.org/licenses/by/'+c.lic+'/';license.textContent='CC BY '+c.lic;
+ el('credit').replaceChildren(source,' by '+c.author+' · ',license,' · '+c.changes);
+}
+el('chicken').onclick=()=>{meal=0;view=1;render()};el('tofu').onclick=()=>{meal=1;view=0;render()};
+el('first').onclick=()=>{view=0;render()};el('second').onclick=()=>{view=1;render()};render();
+</script></html>

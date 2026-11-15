@@ -236,6 +236,16 @@ void main() {
     expect(find.byKey(const Key('photo-paint-instead')), findsNothing);
   });
 
+  testWidgets('a failed photo edit is labelled as an attempt', (tester) async {
+    await openAuto(tester, setUp: (api) => api.checkerPassed = false);
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
+    expect(find.text('Attempted edit'), findsOneWidget);
+    expect(find.textContaining('The automatic check failed.'), findsOneWidget);
+    expect(find.text('After'), findsNothing);
+  });
+
   testWidgets('when the rice is not found the user can paint it instead', (
     tester,
   ) async {
@@ -326,6 +336,33 @@ void main() {
     expect(find.byKey(const Key('picture-not-shown')), findsOneWidget);
     expect(find.text('Reference photo · Unchanged'), findsOneWidget);
   });
+
+  testWidgets(
+    'Meals shows a failed checker verdict beside the stock-photo attempt',
+    (tester) async {
+      final api = FakeApi()
+        ..autoMask = true
+        ..checkerPassed = false;
+      tester.view.physicalSize = const Size(390, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MealPreviewApp(api: api, initialTab: AppTab.meals),
+      );
+      await tester.pumpAndSettle();
+      await selectMeal(tester);
+      await tapKey(tester, 'change-brown_rice');
+      await tester.tap(find.byKey(const Key('submit')));
+      await tester.pump();
+      final image = find.byKey(const Key('meal-picture'));
+      await _pumpUntil(tester, image);
+      final verdict = find.textContaining('The automatic check failed.');
+      expect(
+        tester.getBottomLeft(verdict).dy,
+        lessThan(tester.getTopLeft(image).dy),
+      );
+    },
+  );
 
   testWidgets('Meals review falls back to the honest summary when no picture '
       'can be made', (tester) async {
