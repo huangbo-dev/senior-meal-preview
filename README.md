@@ -2,12 +2,15 @@
 
 **A separate, non-submission app.** This is a working Rust API and Flutter client for rehearsing preference-led meal changes. It lives in its own repository and does not modify any CE7454 coursework files (`sgedit/`, `evaluate/`, `study/`, `report/`, `plan/`, `calib/`, `bench/`); the optional GPU worker only reads the coursework `sgedit` package from the checkout named by `WORKER_SGEDIT_ROOT`.
 
-## v0.2 source-photo flow
+## Own-photo flow (0.5.0)
 The camera/gallery flow in mobile/lib/photo_flow.dart crops and re-encodes a
-rice-meal photo, accepts a painted rice mask, then calls POST /api/v1/photo-preview.
-The catalog's photo_upload capability is separate from fixed-fixture gpu_preview:
-photo_ready=true and gpu_ready=false can coexist. Outputs remain experimental.
-See [current release gates](docs/RELEASE_READINESS_20261113.md).
+rice-meal photo and calls POST /api/v1/photo-preview without a mask: the worker
+finds the rice itself (gpu-worker/auto_mask.py, CLIPSeg + SAM), recolours it to
+brown rice, adds broccoli on a patch, or both. Painting is a fallback when no rice
+is found. The Meals tab sends a meal's reference photo through the same route.
+The catalog advertises photo_upload and auto_mask separately from fixed-fixture
+gpu_preview. Outputs remain experimental and unreviewed; see docs/API.md.
+See [release gates](docs/RELEASE_READINESS_20261113.md) (written for 0.2).
 
 ## Branches
 
@@ -50,7 +53,7 @@ Or run the individual checks:
 python3 scripts/smoke.py
 ```
 
-- `check.sh` runs `cargo fmt --check`, `cargo test --locked` (19 Rust integration tests), `cargo clippy -- -D warnings`, `python3 -m unittest discover -s gpu-worker -p "test_*.py"` (3 GPU worker unit/HTTP test suites), `flutter pub get`, `dart format`, `flutter analyze --fatal-infos` (with `strict-casts`, `strict-inference`, `strict-raw-types`, and `comment_references`), `flutter test` (26 Flutter unit/widget tests), and `flutter build web --release --no-web-resources-cdn`.
+- `check.sh` runs `cargo fmt --check`, `cargo test --locked` (Rust integration tests), `cargo clippy -- -D warnings`, `python3 -m unittest discover -s gpu-worker -p "test_*.py"` (GPU worker unit/HTTP tests), `flutter pub get`, `dart format`, `flutter analyze --fatal-infos` (with `strict-casts`, `strict-inference`, `strict-raw-types`, and `comment_references`), `flutter test` (Flutter unit/widget tests), and `flutter build web --release --no-web-resources-cdn`.
 - `smoke.py` boots both the Python Tailscale GPU worker (`gpu_worker.py --mode dry-run`) and the Rust API gateway, runs the production Dart client (`mobile/tool/smoke_api.dart`) across both `illustrative_only` and `gpu_assisted` modes plus negative validation checks, and stops both processes cleanly.
 
 ## Start locally
