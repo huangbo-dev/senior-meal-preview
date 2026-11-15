@@ -31,3 +31,8 @@ flutter:
           weight: 500
         - asset: assets/fonts/Roboto-Bold.ttf
           weight: 700
+
+dependency_overrides:
+  # 2.3+ builds native JNI code with the NDK, whose x86_64 clang cannot run on this aarch64
+  # build host. 2.2.x uses plain Java (Pigeon) and does the same job.
+  path_provider_android: ">=2.2.0 <2.3.0"
