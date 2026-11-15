@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 
 /// A catalog meal that can be previewed with one or two serving changes.
 class Dish {
@@ -313,6 +314,16 @@ class GpuArtifact {
             attempts <= 8 &&
             imageDataUrl.startsWith('data:image/png;base64,') &&
             generatedLabel.toLowerCase().contains('not')) {
+      final bytes = base64Decode(
+        imageDataUrl.substring('data:image/png;base64,'.length),
+      );
+      const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+      if (bytes.length < 33 ||
+          !signature.asMap().entries.every(
+            (entry) => bytes[entry.key] == entry.value,
+          )) {
+        throw const FormatException('Invalid preview PNG.');
+      }
       return GpuArtifact(
         provider: provider,
         model: model,

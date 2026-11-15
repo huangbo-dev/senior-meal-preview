@@ -885,8 +885,10 @@ class _BeforeAfterSliderState extends State<BeforeAfterSlider> {
                       child: Icon(Icons.compare_arrows, size: 22),
                     ),
                   ),
-                  Positioned(left: 8, top: 8, child: _tag('Before')),
-                  Positioned(right: 8, top: 8, child: _tag('After')),
+                  if (_split > 0)
+                    Positioned(left: 8, top: 8, child: _tag('Before')),
+                  if (_split < 1)
+                    Positioned(right: 8, top: 8, child: _tag('After')),
                 ],
               ),
             ),

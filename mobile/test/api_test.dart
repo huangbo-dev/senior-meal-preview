@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +11,63 @@ import 'package:senior_meal_preview/models.dart';
 import 'fixtures.dart';
 
 void main() {
+  test(
+    'a partial photo edit cannot stand in for two requested changes',
+    () async {
+      final change = {
+        'id': 'brown_rice',
+        'label': 'Rice',
+        'description': 'Brown rice',
+      };
+      final artifact = {
+        'provider': 'test',
+        'model': 'test',
+        'prompt_id': 'test',
+        'seed': 0,
+        'attempts': 1,
+        'checker_passed': false,
+        'generated_label': 'Experimental edit, not reviewed',
+        'image_data_url':
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      };
+      final api = HttpMealApi(
+        client: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'schema_version': 1,
+              'edit_target': change,
+              'edit_targets': [change],
+              'notices': [],
+              'gpu_artifact': artifact,
+            }),
+            200,
+          ),
+        ),
+      );
+      addTearDown(api.close);
+      await expectLater(
+        api.editPhoto(
+          changeIds: ['brown_rice', 'extra_vegetables'],
+          imagePng: Uint8List(0),
+        ),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'reason',
+            contains('match your choices'),
+          ),
+        ),
+      );
+      expect(
+        () => GpuArtifact.fromJson({
+          ...artifact,
+          'image_data_url': 'data:image/png;base64,AAAA',
+        }),
+        throwsFormatException,
+      );
+    },
+  );
+
   test('web defaults to page origin without retaining route or query', () {
     expect(
       resolveApiBaseUrl(

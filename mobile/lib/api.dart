@@ -162,7 +162,26 @@ class HttpMealApi implements MealApi {
         'image_png_base64': base64Encode(imagePng),
       }),
     ),
-    PhotoEditResult.fromJson,
+    (json) {
+      final result = PhotoEditResult.fromJson(json);
+      final echoed = json['edit_targets'];
+      final ids = echoed == null
+          ? [result.editTarget.id]
+          : (echoed as List<dynamic>)
+                .map(
+                  (item) =>
+                      EditTarget.fromJson(item as Map<String, dynamic>).id,
+                )
+                .toList();
+      if (result.editTarget.id != changeIds.first ||
+          ids.length != changeIds.length ||
+          !ids.toSet().containsAll(changeIds)) {
+        throw const ApiException(
+          'The picture did not match your choices. Please try again.',
+        );
+      }
+      return result;
+    },
     limit: photoTimeout,
   );
 

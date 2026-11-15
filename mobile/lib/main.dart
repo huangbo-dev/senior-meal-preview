@@ -1093,6 +1093,11 @@ class _MealFlowState extends State<MealFlow> {
       ],
       if (_pictureNote != null) ...[
         NoticeCard(_pictureNote!, key: const Key('picture-note')),
+        TextButton(
+          onPressed: _submitting ? null : () => _submit(fresh: true),
+          child: const Text('Try making the picture again'),
+        ),
+        if (_makingPicture) _pictureProgress(),
         const SizedBox(height: 16),
       ],
       RequestSummary(

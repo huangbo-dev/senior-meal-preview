@@ -240,6 +240,14 @@ void main() {
     expect(find.text('After'), findsOneWidget);
     // Two changes cannot be painted as one area, so no manual fallback.
     expect(find.byKey(const Key('photo-paint-instead')), findsNothing);
+    await tester.tap(find.text('Change the edit on this photo'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('photo-change-brown_rice')));
+    await tester.pump();
+    await tester.tap(find.text('Mark the area myself'));
+    await tester.pump();
+    expect(find.byKey(const Key('paint-area')), findsOneWidget);
+    expect(api.photoCalls, 1);
   });
 
   testWidgets('when the rice is not found the user can paint it instead', (
@@ -423,6 +431,10 @@ void main() {
     expect(find.text('Your meal request'), findsOneWidget);
     expect(find.byKey(const Key('meal-picture')), findsNothing);
     expect(find.textContaining('No picture'), findsWidgets);
+    api.photoError = null;
+    await tester.tap(find.text('Try making the picture again'));
+    await _pumpUntil(tester, find.byKey(const Key('meal-picture')));
+    expect(api.photoCalls, 2);
   });
 
   testWidgets('a meal picture is saved and shown again at once, and a new '

@@ -330,6 +330,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
               maxWidth: AppLayout.maxOuterWidth,
             ),
             child: ListView(
+              key: ValueKey(_stage),
+              primary: false,
               padding: AppLayout.pagePadding,
               children: switch (_stage) {
                 _Stage.choose => _chooseView(),
@@ -394,8 +396,8 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   List<Widget> _reviewView() => [
     const StepHeading('Check your photo'),
     const Text('This square is the part of your photo that will be sent.'),
-    Image.memory(_photo!, semanticLabel: 'Cropped meal photo'),
     if (_error != null) NoticeCard(_error!, error: true),
+    Image.memory(_photo!, semanticLabel: 'Cropped meal photo'),
     _changeChoices(),
     if (_change.paintable)
       TextButton(
@@ -466,6 +468,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   List<Widget> _paintView() => [
     StepHeading(_change.label),
     const SizedBox(height: 6),
+    if (_error != null) NoticeCard(_error!, error: true),
     Text(_change.paintHint, style: Theme.of(context).textTheme.bodyLarge),
     const SizedBox(height: 12),
     LayoutBuilder(
@@ -559,10 +562,6 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       ],
     ),
     const SizedBox(height: 12),
-    if (_error != null) ...[
-      NoticeCard(_error!, error: true),
-      const SizedBox(height: 12),
-    ],
     if (!pinPrimaryAction(context)) ...[
       _submitButton(),
       const SizedBox(height: 8),
@@ -637,6 +636,14 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
           key: const Key('photo-paint-instead'),
           onPressed: _paintInstead,
           child: const Text('Mark the rice yourself'),
+        ),
+      if (widget.autoMask && !_change.paintable)
+        TextButton(
+          onPressed: () => setState(() {
+            _stage = _Stage.review;
+            _result = null;
+          }),
+          child: const Text('Change the edit on this photo'),
         ),
       Text(
         'Drag across the photo to compare before and after.',
