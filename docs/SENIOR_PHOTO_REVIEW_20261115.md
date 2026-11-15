@@ -32,3 +32,15 @@ No live restart, deployment, frozen study or rating changes.
 - No evidence this UI patch improves image realism. Review existing paired pilot outputs before promoting any model method.
 - Checker acceptance is candidate selection, not independent evaluation or clinical/nutrition validation.
 - Build/version remains 0.4.1 candidate; use commit identity to distinguish it. No release tag or production artifact publication.
+
+
+## Follow-up browser QA and asset packaging
+- Tested the actual release web build in Chrome on ANGEL-WS011 using an isolated loopback mock service (port5187), never the live GPU worker.
+- Desktop and390x844 browser view: home options/privacy, catalogue entry, change selection, preference sheet/cancel, and request-summary disclosure rendered without observed clipping.
+- Uploaded the existing public chicken-rice reference fixture, marked rice, verified the crop gate, submitted a local-only response and observed the prominent failed-check result. The mock explicitly labels unchanged output as LOCAL UI TEST, not model output.
+- Returned to choosing another photo. Same-photo retry and Before/After switching remain covered by automated widget tests; they were not independently completed in this browser pass.
+- A missing-assets problem was found in the initial local build. The repository intentionally excludes meal JPGs; the existing scripts/check.sh already rejects missing assets. The earlier targeted checks bypassed that aggregate packaging prerequisite.
+- Reused the three existing licensed Wikimedia reference JPGs from the prior v0.3.1 local package, confirmed attribution file SHA256 matches this repository, inspected all three images, and rebuilt. Browser verified all three catalogue cards display photographs.
+- No source/user meal photos added to Git. Future fresh-checkout builds still require these attributed files before building.
+- No real model latency measurement: browser upload tooling incurred a long delay, not attributable to app inference.
+- Both temporary local servers stopped, temporary browser viewport reset, QA tabs closed. Production services untouched.
