@@ -80,13 +80,20 @@ GENERATED_DISCLOSURE = (
     "Not a real meal or clinical verification"
 )
 PHOTO_DISCLOSURE = (
-    "Experimental AI edit of your photo, not reviewed by a person · "
+    "Experimental AI edit of this photo, not reviewed by a person · "
     "Not nutrition, allergen or clinical verification"
 )
 RECOLOUR_DISCLOSURE = (
-    "Your own rice, recoloured to look like brown rice. Not AI-generated, not reviewed by a person · "
+    "The rice in this photo, recoloured to look like brown rice. Not AI-generated, not reviewed by a person · "
     "Not nutrition, allergen or clinical verification"
 )
+COMBINED_DISCLOSURE = (
+    "Rice recoloured to look like brown rice (not AI) and broccoli added by an AI image model, "
+    "not reviewed by a person · Not nutrition, allergen or clinical verification"
+)
+# Order in which several changes are applied to one photo: broccoli is generated on the rice as
+# photographed (white), then all the rice is recoloured around it.
+PHOTO_CHANGE_ORDER = ("extra_vegetables", "brown_rice")
 _BLENDED = None
 
 
@@ -96,6 +103,10 @@ class GpuPipelineUnreadyError(RuntimeError):
 
 class PhotoRequestError(ValueError):
     """Raised when an uploaded photo or mask is malformed (HTTP 400)."""
+
+
+class RiceNotFoundError(ValueError):
+    """Raised when no rice can be found automatically in an uploaded photo (HTTP 409)."""
 
 
 class GpuRequestUnsupportedError(RuntimeError):
@@ -241,6 +252,18 @@ def public_model_name(name: str) -> str:
 def is_photo_pipeline_ready() -> bool:
     """Photo edits need the built-in sgedit path (no catalog fixtures, no external command)."""
     return not os.environ.get("WORKER_GPU_CMD", "").strip() and sgedit_root() is not None
+
+
+def is_auto_mask_ready() -> bool:
+    """Finding the rice without a painted mask needs the app methods and both segmenter models."""
+    if not is_photo_pipeline_ready() or photo_method() != "app":
+        return False
+    try:
+        import auto_mask
+
+        return auto_mask.is_available()
+    except Exception:
+        return False
 
 
 def build_dry_run_artifact(
@@ -389,59 +412,87 @@ def _decode_png_b64(value: object, what: str):
     return raw
 
 
-def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> dict[str, object]:
-    """Edit a user-supplied photo inside a user-painted mask.
+def _photo_change_ids(change_ids: object) -> list[str]:
+    """One or two different photo changes, in the order they are applied."""
+    if isinstance(change_ids, str):
+        change_ids = [change_ids]
+    if (
+        not isinstance(change_ids, list)
+        or not 1 <= len(change_ids) <= len(PHOTO_CHANGE_ORDER)
+        or any(not isinstance(c, str) or c not in BUILTIN_TASKS for c in change_ids)
+        or len(set(change_ids)) != len(change_ids)
+    ):
+        raise GpuRequestUnsupportedError(
+            f"Photo edits support one or two different changes from {sorted(BUILTIN_TASKS)}."
+        )
+    return [c for c in PHOTO_CHANGE_ORDER if c in change_ids]
+
+
+def run_photo_pipeline(change_ids: object, image_b64: object, mask_b64: object = None) -> dict[str, object]:
+    """Edit a supplied photo. The rice is found automatically unless a painted mask is sent.
 
     The photo and mask exist only in a per-request temporary directory and are deleted
     when the request finishes, even when WORKER_RUN_DIR is set: user photos are never
-    retained. Only the research rice tasks are supported, one change per photo.
+    retained. Only the rice changes are supported. A painted mask applies to one change;
+    without a mask (app methods only) one or two changes are applied in turn.
     """
-    if not isinstance(change_id, str) or change_id not in BUILTIN_TASKS:
-        raise GpuRequestUnsupportedError(
-            f"Photo edits support exactly one of {sorted(BUILTIN_TASKS)}."
-        )
+    change_ids = _photo_change_ids(change_ids)
+    painted = mask_b64 is not None
+    if painted and len(change_ids) != 1:
+        raise GpuRequestUnsupportedError("A painted area applies to exactly one change.")
+    if not painted and photo_method() != "app":
+        raise GpuRequestUnsupportedError("Finding the rice automatically needs the app photo methods.")
     image_raw = _decode_png_b64(image_b64, "Photo")
-    mask_raw = _decode_png_b64(mask_b64, "Mask")
+    mask_raw = _decode_png_b64(mask_b64, "Mask") if painted else None
     research = load_research()
     np, Image = research.np, research.Image
+    mask_img = None
     try:
         image = Image.open(io.BytesIO(image_raw))
-        mask_img = Image.open(io.BytesIO(mask_raw))
         # Inspect headers before decoding pixel buffers: a compact PNG can expand
         # far beyond the upload byte limit. Apply the budget to both images.
         if min(image.size) < 256 or max(image.size) > 4096:
             raise PhotoRequestError("Photo must be between 256 and 4096 pixels on each side.")
-        if mask_img.size != image.size:
-            raise PhotoRequestError("Mask must be the same size as the photo.")
+        if painted:
+            mask_img = Image.open(io.BytesIO(mask_raw))
+            if mask_img.size != image.size:
+                raise PhotoRequestError("Mask must be the same size as the photo.")
         image.load()
-        mask_img.load()
+        if painted:
+            mask_img.load()
     except PhotoRequestError:
         raise
     except Exception as exc:
         raise PhotoRequestError("Photo or mask could not be decoded.") from exc
     if min(image.size) < 256 or max(image.size) > 4096:
         raise PhotoRequestError("Photo must be between 256 and 4096 pixels on each side.")
-    if mask_img.size != image.size:
+    if painted and mask_img.size != image.size:
         raise PhotoRequestError("Mask must be the same size as the photo.")
     # Re-encode from pixels only: this drops EXIF, GPS and any other metadata.
     side = (FIXTURE_SIDE, FIXTURE_SIDE)
     image = image.convert("RGB").resize(side, Image.LANCZOS)
-    mask = np.asarray(mask_img.convert("L").resize(side, Image.NEAREST)) > 127
-    coverage = float(mask.mean())
-    if coverage < MIN_MASK_COVERAGE or coverage > MAX_MASK_COVERAGE:
-        raise PhotoRequestError(
-            "Paint over the rice only: the painted area must cover between "
-            f"{MIN_MASK_COVERAGE:.0%} and {MAX_MASK_COVERAGE:.0%} of the photo."
-        )
+    if painted:
+        mask = np.asarray(mask_img.convert("L").resize(side, Image.NEAREST)) > 127
+        coverage = float(mask.mean())
+        if coverage < MIN_MASK_COVERAGE or coverage > MAX_MASK_COVERAGE:
+            raise PhotoRequestError(
+                "Paint over the rice only: the painted area must cover between "
+                f"{MIN_MASK_COVERAGE:.0%} and {MAX_MASK_COVERAGE:.0%} of the photo."
+            )
+        masks = {change_ids[0]: mask}
+    else:
+        masks = _auto_masks(image, change_ids)
+        coverage = float(next(iter(masks.values())).mean())
     with tempfile.TemporaryDirectory(prefix="meal-photo-") as tmp:
         original = Path(tmp) / "input.png"
         image.save(original)
         if photo_method() == "app":
-            return _run_app_method(research, image, mask, original, change_id, Path(tmp))
+            return _run_app_method(research, image, masks, original, change_ids, Path(tmp), painted)
+        change_id = change_ids[0]
         return _run_sgedit(
             research,
             image=image,
-            mask=mask,
+            mask=masks[change_id],
             original_path=original,
             job_name="user_photo",
             change_id=change_id,
@@ -451,6 +502,30 @@ def run_photo_pipeline(change_id: str, image_b64: object, mask_b64: object) -> d
             retain=False,
             generated_label=PHOTO_DISCLOSURE,
         )
+
+
+def _auto_masks(image, change_ids: list[str]) -> dict[str, object]:
+    """The area each change edits, found without a painted mask.
+
+    Brown rice edits all the rice; broccoli goes on one patch inside it.
+    """
+    try:
+        import auto_mask
+    except Exception as exc:
+        raise GpuPipelineUnreadyError(f"Cannot load the rice finder: {type(exc).__name__}: {exc}") from exc
+    try:
+        with _GPU_LOCK:
+            rice, stats = auto_mask.find_rice(image)
+    except auto_mask.RiceNotFound as exc:
+        sys.stderr.write(f"[gpu-worker] auto-mask: no rice found ({exc})\n")
+        raise RiceNotFoundError("No rice could be found in the photo.") from exc
+    except Exception as exc:
+        raise GpuPipelineUnreadyError(f"Rice finder failed: {type(exc).__name__}: {exc}") from exc
+    sys.stderr.write(f"[gpu-worker] auto-mask: {stats}\n")
+    return {
+        change_id: rice if change_id == "brown_rice" else auto_mask.broccoli_patch(rice)
+        for change_id in change_ids
+    }
 
 
 def photo_method() -> str:
@@ -474,18 +549,25 @@ def _preview_data_url(image, Image) -> str:
 
 
 def _run_app_method(
-    research: SimpleNamespace, image, mask, original_path: Path, change_id: str, tmp: Path
+    research: SimpleNamespace,
+    image,
+    masks: dict[str, object],
+    original_path: Path,
+    change_ids: list[str],
+    tmp: Path,
+    painted: bool = True,
 ) -> dict[str, object]:
-    """App-only edits of a user photo (see app_methods.py). Never the research policy.
+    """App-only edits of a photo (see app_methods.py). Never the research policy.
 
-    brown_rice recolours the user's own rice (no generative model, one attempt).
-    extra_vegetables adds broccoli on the painted patch with blended SDXL image-to-image and
-    retries with a new seed while the checker fails, within the attempt and time limits.
-    The checker verdict is reported as a diagnostic exactly as on the research path.
+    brown_rice recolours the photographed rice (no generative model, one attempt).
+    extra_vegetables adds broccoli on a patch with blended SDXL image-to-image and retries
+    with a new seed while the checker fails, within the attempt and time limits. With two
+    changes the second is applied to the result of the first, and each step is checked
+    against the picture it started from. The checker verdict is reported as a diagnostic
+    exactly as on the research path; `checker_passed` is true only if every step passed.
     """
     global _BLENDED
     loop, Image = research.loop, research.Image
-    task = BUILTIN_TASKS[change_id]
     try:
         import app_methods
 
@@ -494,68 +576,99 @@ def _run_app_method(
         checker = loop.CheckerClient(
             url=os.environ.get("WORKER_CHECKER_URL", "").strip() or DEFAULT_CHECKER_URL
         )
-        box = list(research.editor.crop_box(mask, 0.25, 256, image.size[0]))
-
-        def checked(candidate, name: str) -> dict[str, object]:
-            path = tmp / name
-            candidate.save(path)
-            verdict = checker.check(str(original_path.resolve()), str(path), task, "rice", box)
-            return {
-                "image": candidate,
-                "score": loop.score(verdict),
-                "pass": loop.passes(verdict),
-                "model": str(verdict.get("model", "qwen2.5-vl checker")),
-            }
+        current, current_path = image, original_path
+        attempts, passed, seed_used, checker_model = 0, True, 0, "qwen2.5-vl checker"
+        methods, prompt_ids = [], []
 
         with _GPU_LOCK:
             started = time.monotonic()
-            if change_id == "brown_rice":
-                tried = [checked(app_methods.recolour_rice(image, mask), "recolour.png")]
-                seeds_used = [0]
-                method = "lab-recolour (no generative model)"
-                prompt_id = "{}:recolour:L{:g}a{:g}b{:g}".format(
-                    app_methods.METHOD_VERSION, *app_methods.BROWN_RICE_LAB
-                )
-                label = RECOLOUR_DISCLOSURE
-            else:
-                editor = get_editor(research)
-                if _BLENDED is None:
-                    _BLENDED = app_methods.BlendedEditor(editor)
-                seeds = loop.POLICY["seeds"]
-                tried, seeds_used, durations = [], [], []
-                while len(tried) < max_attempts:
-                    elapsed = time.monotonic() - started
-                    if tried and (
-                        tried[-1]["pass"] or (time_budget and elapsed + max(durations) > time_budget)
-                    ):
-                        break
-                    seed = seeds[len(tried) % len(seeds)]
-                    out = _BLENDED.add_broccoli(image, mask, seed, research.editor)
-                    tried.append(checked(out, f"blend{len(tried)}.png"))
-                    seeds_used.append(seed)
-                    durations.append(time.monotonic() - started - elapsed)
-                method = "sdxl-base-1.0 masked image-to-image"
-                prompt_id = "{}:blend:T1-B:s{:g}:g{:g}".format(
-                    app_methods.METHOD_VERSION,
-                    app_methods.BROCCOLI_STRENGTH,
-                    app_methods.BROCCOLI_GUIDANCE,
-                )
-                label = PHOTO_DISCLOSURE
-            pick = max(range(len(tried)), key=lambda i: tried[i]["score"])
-            selected = tried[pick]
-            image_data_url = _preview_data_url(selected["image"], Image)
+            for change_id in change_ids:
+                task, mask = BUILTIN_TASKS[change_id], masks[change_id]
+                box = list(research.editor.crop_box(mask, 0.25, 256, image.size[0]))
+
+                def checked(candidate, name: str) -> dict[str, object]:
+                    path = tmp / name
+                    candidate.save(path)
+                    verdict = checker.check(str(current_path.resolve()), str(path), task, "rice", box)
+                    return {
+                        "image": candidate,
+                        "score": loop.score(verdict),
+                        "pass": loop.passes(verdict),
+                        "model": str(verdict.get("model", "qwen2.5-vl checker")),
+                    }
+
+                if change_id == "brown_rice":
+                    if "extra_vegetables" in change_ids:
+                        mask = mask & ~app_methods.added_greens(current, masks["extra_vegetables"])
+                    tried = [checked(app_methods.recolour_rice(current, mask), "recolour.png")]
+                    seeds_used = [0]
+                    methods.append("lab-recolour (no generative model)")
+                    prompt_ids.append(
+                        "{}:recolour:L{:g}a{:g}b{:g}".format(
+                            app_methods.METHOD_VERSION, *app_methods.BROWN_RICE_LAB
+                        )
+                    )
+                else:
+                    editor = get_editor(research)
+                    if _BLENDED is None:
+                        _BLENDED = app_methods.BlendedEditor(editor)
+                    seeds = loop.POLICY["seeds"]
+                    tried, seeds_used, durations = [], [], []
+                    while len(tried) < max(1, max_attempts - attempts):
+                        elapsed = time.monotonic() - started
+                        if tried and (
+                            tried[-1]["pass"] or (time_budget and elapsed + max(durations) > time_budget)
+                        ):
+                            break
+                        seed = seeds[len(tried) % len(seeds)]
+                        step_started = time.monotonic()
+                        out = _BLENDED.add_broccoli(current, mask, seed, research.editor)
+                        tried.append(checked(out, f"blend{len(tried)}.png"))
+                        seeds_used.append(seed)
+                        durations.append(time.monotonic() - step_started)
+                    methods.append("sdxl-base-1.0 masked image-to-image")
+                    prompt_ids.append(
+                        "{}:blend:T1-B:s{:g}:g{:g}".format(
+                            app_methods.METHOD_VERSION,
+                            app_methods.BROCCOLI_STRENGTH,
+                            app_methods.BROCCOLI_GUIDANCE,
+                        )
+                    )
+                pick = max(range(len(tried)), key=lambda i: tried[i]["score"])
+                selected = tried[pick]
+                if change_id == "extra_vegetables":
+                    seed_used = int(seeds_used[pick])
+                attempts += len(tried)
+                passed = passed and bool(selected["pass"])
+                checker_model = selected["model"]
+                current = selected["image"]
+                current_path = tmp / f"step-{change_id}.png"
+                current.save(current_path)
+            image_data_url = _preview_data_url(current, Image)
             seconds = time.monotonic() - started
+        if not painted:
+            import auto_mask
+
+            prompt_ids.append(auto_mask.VERSION)
+        label = (
+            COMBINED_DISCLOSURE
+            if len(change_ids) > 1
+            else RECOLOUR_DISCLOSURE
+            if change_ids[0] == "brown_rice"
+            else PHOTO_DISCLOSURE
+        )
         sys.stderr.write(
-            f"[gpu-worker] user_photo/{task} (app method): attempts={len(tried)} "
-            f"selected={pick} checker_passed={bool(selected['pass'])} seconds={seconds:.1f}\n"
+            f"[gpu-worker] user_photo/{'+'.join(change_ids)} (app method, "
+            f"{'painted' if painted else 'auto'} mask): attempts={attempts} "
+            f"checker_passed={passed} seconds={seconds:.1f}\n"
         )
         return {
             "provider": "tailscale-gpu-worker",
-            "model": f"{method}+{public_model_name(str(selected['model']))}",
-            "prompt_id": prompt_id,
-            "seed": int(seeds_used[pick]),
-            "attempts": len(tried),
-            "checker_passed": bool(selected["pass"]),
+            "model": f"{' + '.join(methods)}+{public_model_name(str(checker_model))}",
+            "prompt_id": "+".join(prompt_ids),
+            "seed": int(seed_used or 0),
+            "attempts": min(8, attempts),
+            "checker_passed": passed,
             "image_data_url": image_data_url,
             "generated_label": label,
         }
@@ -747,13 +860,17 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     "worker_mode": self.mode,
                     "gpu_ready": self.mode == "gpu" and is_gpu_pipeline_ready(),
                     "photo_ready": self.mode == "gpu" and is_photo_pipeline_ready(),
+                    "auto_mask_ready": self.mode == "gpu" and is_auto_mask_ready(),
                 },
             )
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def _handle_photo(self) -> None:
-        """Edit an uploaded photo inside its painted mask. Never fakes an output."""
+        """Edit an uploaded photo; the rice is found automatically unless a mask is sent.
+
+        Accepts `change_ids` (one or two) or the older single `change_id`. Never fakes an output.
+        """
         if not self._check_auth():
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
@@ -770,7 +887,11 @@ class WorkerHandler(BaseHTTPRequestHandler):
         except Exception:
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": "invalid_json"})
             return
-        if not isinstance(data, dict) or set(data) - {"schema_version", "change_id", "image_png_base64", "mask_png_base64"}:
+        if (
+            not isinstance(data, dict)
+            or set(data) - {"schema_version", "change_id", "change_ids", "image_png_base64", "mask_png_base64"}
+            or ("change_id" in data) == ("change_ids" in data)
+        ):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_photo_request"})
             return
         if self.mode != "gpu" or os.environ.get("WORKER_GPU_CMD", "").strip():
@@ -782,8 +903,13 @@ class WorkerHandler(BaseHTTPRequestHandler):
             return
         try:
             artifact = run_photo_pipeline(
-                data.get("change_id"), data.get("image_png_base64"), data.get("mask_png_base64")
+                data["change_ids"] if "change_ids" in data else [data.get("change_id")],
+                data.get("image_png_base64"),
+                data.get("mask_png_base64"),
             )
+        except RiceNotFoundError as exc:
+            self._send_json(HTTPStatus.CONFLICT, {"error": "rice_not_found", "message": str(exc)})
+            return
         except PhotoRequestError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_photo", "message": str(exc)})
             return
@@ -921,6 +1047,11 @@ def main() -> None:
         except Exception as exc:
             raise SystemExit(f"--warm could not load the sgedit editor: {type(exc).__name__}: {exc}")
         print("sgedit editor loaded", flush=True)
+        if is_auto_mask_ready():
+            import auto_mask
+
+            auto_mask.warm()
+            print("rice finder loaded", flush=True)
 
     WorkerHandler.expected_token = token
     WorkerHandler.mode = args.mode

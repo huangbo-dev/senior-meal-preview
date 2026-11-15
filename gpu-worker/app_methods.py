@@ -18,16 +18,22 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_dilation, gaussian_filter
 
-METHOD_VERSION = "app-v1"
+METHOD_VERSION = "app-v2"
 
 # Cooked brown rice as a CIELAB (L*, a*, b*) target for the median rice pixel, and the gain on
 # lightness differences (bran makes single grains stand out a little more than polished rice).
 BROWN_RICE_LAB = (56.0, 11.0, 29.0)
 BROWN_RICE_GAIN = 1.35
+# How far a pixel may differ from the median rice pixel and still carry that difference into the
+# result: (darker L*, lighter L*, a*/b* either way). Rice that is much whiter than the rest, such
+# as grains an image model drew next to added broccoli, would otherwise stay pale.
+BROWN_RICE_SPREAD = (30.0, 12.0, 10.0)
 
 BROCCOLI_PROMPT = (
     "food photo, a few bright green cooked broccoli florets resting on a mound of steamed white rice"
 )
+# CIELAB a* below this counts as green when keeping added broccoli out of a later rice recolour.
+GREEN_A_MAX = -14.0
 BROCCOLI_NEGATIVE = "bowl, plate, dish, cup, saucer, blurry, cartoon, text"
 BROCCOLI_STRENGTH = 0.95
 BROCCOLI_STEPS = 20
@@ -69,6 +75,16 @@ def _disk(radius: int) -> np.ndarray:
     return x * x + y * y <= radius * radius
 
 
+def added_greens(image: Image.Image, patch: np.ndarray) -> np.ndarray:
+    """Green pixels in and just around `patch`: the broccoli an earlier step put there.
+
+    Used to recolour the rice after broccoli was added without tinting the broccoli brown.
+    """
+    lab = rgb_to_lab(np.asarray(image.convert("RGB")))
+    green = (lab[..., 1] < GREEN_A_MAX) & binary_dilation(patch.astype(bool), _disk(12))
+    return binary_dilation(green, _disk(1))
+
+
 def recolour_rice(image: Image.Image, mask: np.ndarray) -> Image.Image:
     """Shift the painted rice to a cooked-brown-rice colour, keeping every grain.
 
@@ -81,11 +97,14 @@ def recolour_rice(image: Image.Image, mask: np.ndarray) -> Image.Image:
     lab = rgb_to_lab(rgb)
     centre = np.median(lab[mask], 0)
     out = lab.copy()
+    darker, lighter, chroma = BROWN_RICE_SPREAD
     out[..., 0] = np.clip(
-        BROWN_RICE_LAB[0] + (lab[..., 0] - centre[0]) * BROWN_RICE_GAIN, 0, 100
+        BROWN_RICE_LAB[0] + np.clip(lab[..., 0] - centre[0], -darker, lighter) * BROWN_RICE_GAIN,
+        0,
+        100,
     )
-    out[..., 1] = BROWN_RICE_LAB[1] + (lab[..., 1] - centre[1])
-    out[..., 2] = BROWN_RICE_LAB[2] + (lab[..., 2] - centre[2])
+    out[..., 1] = BROWN_RICE_LAB[1] + np.clip(lab[..., 1] - centre[1], -chroma, chroma)
+    out[..., 2] = BROWN_RICE_LAB[2] + np.clip(lab[..., 2] - centre[2], -chroma, chroma)
     rice_like = np.clip((lab[..., 0] - (centre[0] - 30)) / 15, 0, 1)
     near = binary_dilation(mask, _disk(6))
     weight = np.clip(gaussian_filter(mask.astype("float64"), 2.5), 0, 1) * np.where(near, rice_like, 0)

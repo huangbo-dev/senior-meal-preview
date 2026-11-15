@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,7 @@ import 'theme.dart';
 import 'widgets.dart';
 
 /// Shown in About; keep in step with `version:` in pubspec.yaml and CHANGELOG.md.
-const appVersion = '0.4.1';
+const appVersion = '0.5.0';
 
 void main() => runApp(const MealPreviewApp());
 
@@ -58,6 +59,14 @@ class _MealFlowState extends State<MealFlow> {
   MealPreferences _preferences = const MealPreferences();
   String _renderMode = 'illustrative_only';
   MealPreview? _preview;
+
+  /// The meal's reference photo with the chosen changes made to it, when the
+  /// server could make one for the current preview.
+  PhotoEditResult? _picture;
+  Uint8List? _pictureBytes;
+
+  /// Why the current preview has no picture although one was attempted.
+  String? _pictureNote;
   bool _loading = true;
   bool _submitting = false;
   String? _error;
@@ -180,8 +189,36 @@ class _MealFlowState extends State<MealFlow> {
           'The preview did not match your choices. Please try again.',
         );
       }
+      PhotoEditResult? picture;
+      String? pictureNote;
+      if (result.gpuArtifact == null && _picturable.isNotEmpty) {
+        // The summary is ready; a missing picture never blocks it.
+        try {
+          final asset = await rootBundle.load('assets/meals/${dish.id}.jpg');
+          picture = await _api.editPhoto(
+            changeIds: _picturable,
+            imagePng: await squarePng(asset.buffer.asUint8List()),
+          );
+        } catch (error) {
+          pictureNote = error is ApiException && error.code == 'rice_not_found'
+              ? 'This meal photo shows no rice to change, so there is no '
+                    'picture. Your request is summarised below.'
+              : 'A picture could not be made this time. Your request is '
+                    'summarised below.';
+        }
+        if (!mounted || version != _requestVersion) return;
+      }
       setState(() {
         _preview = result;
+        _picture = picture;
+        _pictureBytes = picture == null
+            ? null
+            : base64Decode(
+                picture.artifact.imageDataUrl.substring(
+                  'data:image/png;base64,'.length,
+                ),
+              );
+        _pictureNote = pictureNote;
         _submitting = false;
         _step = 2;
       });
@@ -194,6 +231,12 @@ class _MealFlowState extends State<MealFlow> {
       });
     }
   }
+
+  /// The chosen changes a picture can show, when the server finds the rice
+  /// in the meal's reference photo itself. Empty means summary only.
+  List<String> get _picturable => (_catalog?.capabilities.autoMask ?? false)
+      ? PhotoChange.picturable(_changes)
+      : const [];
 
   bool get _pinAction => pinPrimaryAction(context);
 
@@ -237,6 +280,7 @@ class _MealFlowState extends State<MealFlow> {
           PhotoEditPage(
             api: _api,
             available: _catalog?.capabilities.photoUpload ?? false,
+            autoMask: _catalog?.capabilities.autoMask ?? false,
             onBackToMeals: () => _selectTab(AppTab.meals),
           ),
           _mealsTab(),
@@ -453,10 +497,10 @@ class _MealFlowState extends State<MealFlow> {
               : _submit,
           busy: _submitting,
           label: _submitting
-              ? 'Preparing…'
+              ? (_picturable.isEmpty ? 'Preparing…' : 'Making your picture…')
               : _error != null
               ? 'Try again'
-              : _renderMode == 'gpu_assisted'
+              : _renderMode == 'gpu_assisted' || _picturable.isNotEmpty
               ? 'Generate preview'
               : _changes.isEmpty
               ? 'Choose a change'
@@ -885,6 +929,8 @@ class _MealFlowState extends State<MealFlow> {
 
   List<Widget> _showPreview() {
     final preview = _preview!;
+    final picture = _picture;
+    if (picture != null) return _showPicture(preview, picture);
     return [
       StepProgress(step: _step, labels: _steps),
       const SizedBox(height: 8),
@@ -926,6 +972,10 @@ class _MealFlowState extends State<MealFlow> {
         ),
         const SizedBox(height: 24),
       ],
+      if (_pictureNote != null) ...[
+        NoticeCard(_pictureNote!, key: const Key('picture-note')),
+        const SizedBox(height: 16),
+      ],
       RequestSummary(
         targets: preview.targets,
         preferences: preview.preferences,
@@ -933,6 +983,102 @@ class _MealFlowState extends State<MealFlow> {
       const SizedBox(height: 18),
       Text(
         preview.notices.join(' '),
+        key: const Key('preview-notices'),
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      const SizedBox(height: 10),
+      CupertinoButton(
+        key: const Key('new-meal'),
+        onPressed: () => _goTo(0),
+        color: AppColors.surfaceSubtle,
+        borderRadius: BorderRadius.circular(AppRadius.button),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        minimumSize: const Size(double.infinity, 56),
+        child: Text(
+          'Choose another meal',
+          style: AppTypography.style(17, color: AppColors.accent),
+        ),
+      ),
+    ];
+  }
+
+  /// The review step when the meal's reference photo was edited for real.
+  List<Widget> _showPicture(MealPreview preview, PhotoEditResult picture) {
+    final shown = picture.artifact;
+    final notShown = [
+      for (final target in preview.targets)
+        if (!_picturable.contains(target.id)) target.label,
+    ];
+    return [
+      StepProgress(step: _step, labels: _steps),
+      const SizedBox(height: 8),
+      StepHeading(
+        'Your preview',
+        focusNode: _headingFocus,
+        style: AppTypography.editorial,
+      ),
+      const SizedBox(height: 12),
+      Text(
+        'How ${preview.dish.name.toLowerCase()} could look with your changes',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      const SizedBox(height: 16),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Image.memory(
+            _pictureBytes!,
+            key: const Key('meal-picture'),
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            semanticLabel: shown.generatedLabel,
+          ),
+        ),
+      ),
+      const SizedBox(height: 10),
+      Text(
+        shown.generatedLabel,
+        key: const Key('preview-disclosure'),
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      const SizedBox(height: 20),
+      Text('Before', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 6),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: 2.1,
+          child: MealArtwork(dish: preview.dish),
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Reference photo · Unchanged',
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+      const SizedBox(height: 20),
+      if (notShown.isNotEmpty) ...[
+        NoticeCard(
+          'Not shown in the picture: ${notShown.join(', ')}.',
+          key: const Key('picture-not-shown'),
+        ),
+        const SizedBox(height: 16),
+      ],
+      RequestSummary(
+        targets: preview.targets,
+        preferences: preview.preferences,
+      ),
+      const SizedBox(height: 18),
+      Text(
+        [
+          for (final notice in preview.notices)
+            notice.startsWith('No picture was generated')
+                ? 'The picture is an edit of a stock photo, not a real meal, '
+                      'and no person has checked it. Your choices are not '
+                      'saved.'
+                : notice,
+        ].join(' '),
         key: const Key('preview-notices'),
         style: Theme.of(context).textTheme.bodyMedium,
       ),

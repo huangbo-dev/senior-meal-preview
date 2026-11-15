@@ -87,15 +87,17 @@ pub struct WorkerGenerateRequest {
     pub flavour: Flavour,
 }
 
-/// Request sent to `<MODEL_WORKER_URL>/v1/generate-photo`: one research change applied inside a
-/// user-painted mask on a user-taken photo. Both images are PNG (re-encoded on the phone, so they
-/// carry no EXIF/location metadata); the worker deletes them when the request finishes.
+/// Request sent to `<MODEL_WORKER_URL>/v1/generate-photo`: one or two rice changes applied to a
+/// photo. Without a mask the worker finds the rice itself; a user-painted mask applies to exactly
+/// one change. Images are PNG (re-encoded on the phone, so they carry no EXIF/location metadata);
+/// the worker deletes them when the request finishes.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkerPhotoRequest {
     pub schema_version: u8,
-    pub change_id: String,
+    pub change_ids: Vec<String>,
     pub image_png_base64: String,
-    pub mask_png_base64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask_png_base64: Option<String>,
 }
 
 /// Provenance and output returned by the GPU worker and forwarded to the client.
@@ -131,6 +133,8 @@ pub enum WorkerFailure {
     NotReady,
     /// The worker could not use the uploaded photo or mask (HTTP 400).
     BadPhoto,
+    /// The worker looked for rice in the photo and found none (HTTP 409).
+    RiceNotFound,
     Unreachable(String),
     InvalidResponse(String),
 }
@@ -259,6 +263,8 @@ pub struct WorkerReadiness {
     pub gpu_preview: bool,
     /// Edits of user-taken photos (needs only the built-in model path).
     pub photo_upload: bool,
+    /// Photo edits without a painted mask: the worker finds the rice itself.
+    pub auto_mask: bool,
 }
 
 pub async fn worker_readiness(config: &GpuWorkerConfig) -> WorkerReadiness {
@@ -319,6 +325,8 @@ async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<WorkerReadine
         gpu_ready: bool,
         #[serde(default)]
         photo_ready: bool,
+        #[serde(default)]
+        auto_mask_ready: bool,
     }
     let Ok(health) = serde_json::from_slice::<Readiness>(&bytes[end + 4..]) else {
         return Ok(WorkerReadiness::default());
@@ -327,6 +335,7 @@ async fn read_worker_readiness(config: &GpuWorkerConfig) -> Result<WorkerReadine
     Ok(WorkerReadiness {
         gpu_preview: real && health.gpu_ready,
         photo_upload: real && health.photo_ready,
+        auto_mask: real && health.photo_ready && health.auto_mask_ready,
     })
 }
 
@@ -351,7 +360,7 @@ pub async fn request_gpu_preview(
     .map_err(|_| WorkerFailure::Timeout)?
 }
 
-/// Ask the worker to edit a user-taken photo inside its painted mask.
+/// Ask the worker to edit a photo (rice found automatically, or inside a painted mask).
 pub async fn request_gpu_photo_edit(
     config: &GpuWorkerConfig,
     payload: &WorkerPhotoRequest,
@@ -466,6 +475,7 @@ async fn send_worker_http(
     match status_code {
         200..300 => {}
         400 => return Err(WorkerFailure::BadPhoto),
+        409 => return Err(WorkerFailure::RiceNotFound),
         422 => return Err(WorkerFailure::Unsupported),
         503 => return Err(WorkerFailure::NotReady),
         _ => {

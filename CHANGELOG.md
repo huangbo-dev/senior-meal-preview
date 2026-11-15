@@ -3,6 +3,22 @@
 Android debug builds are published on the `apk/debug-0.1.0-20261111` branch as
 `sg-food-edit-<version>-debug-<abi>.apk`. The version is also shown in the app under **About**.
 
+## 0.5.0 — 2026-11-15
+
+- **No more painting.** On My photo, choose a change and a photo: the app finds the rice by itself
+  and makes the change. Brown rice now covers all the rice, not just a brush stroke.
+- **Both changes at once**: a new choice, "Both: brown rice with broccoli".
+- **Meals now shows a picture.** Choosing brown rice or added vegetables for a sample meal shows
+  the meal's reference photo with that change made, instead of "No picture generated". Sauce on
+  the side, texture and flavour are still text only, and the screen says so. The tofu photo shows
+  no rice, so it stays a summary.
+- If the rice cannot be found, you are asked to paint it instead, and "Not right? Mark the rice
+  yourself" is offered under a result. Painting no longer scrolls the page under your finger.
+- The rice finder (CLIPSeg + SAM) was set up by eye on five photos. It is a best guess, not an
+  evaluated method, and can pick the wrong area. Results are still not reviewed by a person.
+- Needs a server with the rice finder (`capabilities.auto_mask`). Against an older server the app
+  keeps the painted flow. 0.4.1 keeps working against the new server.
+
 ## 0.4.1 — 2026-11-14
 
 - **The app now opens on "My photo".** It is the first tab, so you can take or choose a meal photo

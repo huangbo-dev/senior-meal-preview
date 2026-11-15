@@ -49,6 +49,20 @@ class RecolourTest(unittest.TestCase):
         self.assertLess(int(np.abs(after[103:107, 103:107].astype(int) - (20, 60, 20)).max()), 12)
 
 
+@unittest.skipIf(app_methods is None, "image libraries unavailable")
+class AddedGreensTest(unittest.TestCase):
+    def test_only_green_near_the_patch_is_kept_out_of_the_recolour(self):
+        rgb = np.full((128, 128, 3), 235, "uint8")  # white rice everywhere
+        rgb[50:70, 50:70] = (40, 140, 40)  # broccoli inside the patch
+        rgb[5:15, 5:15] = (40, 140, 40)  # cucumber far from the patch
+        patch = np.zeros((128, 128), bool)
+        patch[40:80, 40:80] = True
+        greens = app_methods.added_greens(Image.fromarray(rgb), patch)
+        self.assertTrue(greens[55:65, 55:65].all())
+        self.assertFalse(greens[5:15, 5:15].any())
+        self.assertFalse(greens[100:, 100:].any())
+
+
 class PhotoMethodSwitchTest(unittest.TestCase):
     def test_default_is_the_research_policy(self):
         with mock.patch.dict(os.environ, {}, clear=False):

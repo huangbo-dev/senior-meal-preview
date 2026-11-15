@@ -881,8 +881,53 @@ async fn photo_preview_forwards_a_large_upload_to_the_worker_photo_route() {
     assert!(value["notices"].to_string().contains("not saved"));
     let sent = task.await.unwrap();
     assert!(sent.starts_with("POST /v1/generate-photo HTTP/1.1"));
-    assert!(sent.contains("\"change_id\":\"brown_rice\""));
+    assert!(sent.contains("\"change_ids\":[\"brown_rice\"]"));
+    assert!(sent.contains("\"mask_png_base64\""));
     assert!(sent.contains(&image));
+}
+
+#[tokio::test]
+async fn photo_preview_without_a_mask_asks_the_worker_to_find_the_rice() {
+    let artifact = json!({
+        "provider": "tailscale-gpu-worker",
+        "model": "lab-recolour + sdxl+qwen",
+        "prompt_id": "app-v2:blend+app-v2:recolour+automask-v1",
+        "seed": 7,
+        "attempts": 2,
+        "checker_passed": false,
+        "image_data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "generated_label": "Rice recoloured (not AI) and broccoli added by an AI image model"
+    });
+    let (port, task) = mock_worker("200 OK", artifact.to_string()).await;
+    let (status, value) = post_photo(
+        photo_app(Some(port)),
+        json!({"change_ids": ["brown_rice", "extra_vegetables"], "image_png_base64": photo_b64(4096)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["edit_target"]["id"], "brown_rice");
+    assert_eq!(value["edit_targets"][1]["id"], "extra_vegetables");
+    let sent = task.await.unwrap();
+    assert!(sent.contains("\"change_ids\":[\"brown_rice\",\"extra_vegetables\"]"));
+    assert!(!sent.contains("mask_png_base64"));
+}
+
+#[tokio::test]
+async fn photo_preview_says_plainly_when_no_rice_was_found() {
+    let (port, task) = mock_worker(
+        "409 Conflict",
+        r#"{"error":"rice_not_found","message":"internal detail"}"#.into(),
+    )
+    .await;
+    let (status, value) = post_photo(
+        photo_app(Some(port)),
+        json!({"change_ids": ["brown_rice"], "image_png_base64": photo_b64(64)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(value["error"]["code"], "rice_not_found");
+    assert!(!value.to_string().contains("internal detail"));
+    task.await.unwrap();
 }
 
 #[tokio::test]
@@ -896,7 +941,18 @@ async fn photo_preview_validates_before_contacting_the_worker() {
     jpeg["image_png_base64"] = json!("/9j/4AAQSkZJRgABAQ==");
     let mut junk = ok();
     junk["mask_png_base64"] = json!("iVBORw0KGgo<script>");
+    let two_painted = json!({"change_ids": ["brown_rice", "extra_vegetables"], "image_png_base64": photo_b64(64), "mask_png_base64": photo_b64(64)});
+    let repeated =
+        json!({"change_ids": ["brown_rice", "brown_rice"], "image_png_base64": photo_b64(64)});
+    let none = json!({"change_ids": [], "image_png_base64": photo_b64(64)});
+    let both_fields = json!({"change_id": "brown_rice", "change_ids": ["brown_rice"], "image_png_base64": photo_b64(64)});
+    let no_mask = json!({"change_ids": ["brown_rice"], "image_png_base64": photo_b64(64)});
     for (body, expected, code) in [
+        (two_painted, StatusCode::BAD_REQUEST, "unsupported_change"),
+        (repeated, StatusCode::BAD_REQUEST, "unsupported_change"),
+        (none, StatusCode::BAD_REQUEST, "unsupported_change"),
+        (both_fields, StatusCode::BAD_REQUEST, "unsupported_change"),
+        (no_mask, StatusCode::SERVICE_UNAVAILABLE, "gpu_unavailable"),
         (unknown, StatusCode::UNPROCESSABLE_ENTITY, "invalid_json"),
         (sauce, StatusCode::BAD_REQUEST, "unsupported_change"),
         (jpeg, StatusCode::BAD_REQUEST, "photo_invalid"),
@@ -941,20 +997,29 @@ async fn photo_preview_reports_worker_photo_rejection_without_details() {
 
 #[tokio::test]
 async fn catalog_advertises_photo_upload_separately_from_dish_previews() {
-    for (health, gpu, photo) in [
+    for (health, gpu, photo, auto) in [
         (
             r#"{"status":"ok","worker_mode":"gpu","gpu_ready":false,"photo_ready":true}"#,
             false,
             true,
+            false,
         ),
         (
-            r#"{"status":"ok","worker_mode":"dry-run","gpu_ready":false,"photo_ready":true}"#,
+            r#"{"status":"ok","worker_mode":"gpu","gpu_ready":false,"photo_ready":true,"auto_mask_ready":true}"#,
+            false,
+            true,
+            true,
+        ),
+        (
+            r#"{"status":"ok","worker_mode":"dry-run","gpu_ready":false,"photo_ready":true,"auto_mask_ready":true}"#,
+            false,
             false,
             false,
         ),
         (
             r#"{"status":"ok","worker_mode":"gpu","gpu_ready":true}"#,
             true,
+            false,
             false,
         ),
     ] {
@@ -972,6 +1037,7 @@ async fn catalog_advertises_photo_upload_separately_from_dish_previews() {
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["capabilities"]["gpu_preview"], gpu, "{health}");
         assert_eq!(value["capabilities"]["photo_upload"], photo, "{health}");
+        assert_eq!(value["capabilities"]["auto_mask"], auto, "{health}");
         assert!(task.await.unwrap().starts_with("GET /healthz"));
     }
 }

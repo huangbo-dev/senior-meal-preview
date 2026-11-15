@@ -7,7 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:senior_meal_preview/main.dart';
 import 'package:senior_meal_preview/photo_flow.dart';
 
-import 'widget_test.dart' show FakeApi, fakeCameraPng;
+import 'widget_test.dart' show FakeApi, fakeCameraPng, selectMeal, tapKey;
 
 const _pngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -190,5 +190,161 @@ void main() {
     await _pumpUntil(tester, find.text('Paint over the rice only.'));
     expect(find.byKey(const Key('paint-area')), findsOneWidget);
     expect(find.text('Make the change'), findsOneWidget);
+  });
+
+  Future<FakeApi> openAuto(
+    WidgetTester tester, {
+    bool autoMask = true,
+    void Function(FakeApi)? setUp,
+  }) async {
+    final api = FakeApi();
+    setUp?.call(api);
+    tester.view.physicalSize = const Size(700, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final png = (await tester.runAsync(fakeCameraPng))!;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PhotoEditPage(
+          api: api,
+          available: true,
+          autoMask: autoMask,
+          picker: (_) async => png,
+        ),
+      ),
+    );
+    return api;
+  }
+
+  testWidgets('with automatic rice finding a chosen photo is edited with '
+      'no painting, and both changes can be made at once', (tester) async {
+    final api = await openAuto(tester);
+    await tester.tap(
+      find.byKey(const Key('photo-change-brown_rice+extra_vegetables')),
+    );
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
+
+    expect(api.sentPhotoChange, 'brown_rice+extra_vegetables');
+    expect(api.sentPhoto!.sublist(0, 8), _pngSignature);
+    expect(api.sentMask, isNull);
+    expect(find.byKey(const Key('paint-area')), findsNothing);
+    expect(find.text('Before'), findsOneWidget);
+    expect(find.text('After'), findsOneWidget);
+    // Two changes cannot be painted as one area, so no manual fallback.
+    expect(find.byKey(const Key('photo-paint-instead')), findsNothing);
+  });
+
+  testWidgets('when the rice is not found the user can paint it instead', (
+    tester,
+  ) async {
+    final api = await openAuto(
+      tester,
+      setUp: (api) => api
+        ..photoError = 'We could not find rice in this photo.'
+        ..photoErrorCode = 'rice_not_found',
+    );
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('paint-area')));
+    expect(find.textContaining('could not find the rice'), findsOneWidget);
+    expect(api.sentMask, isNull);
+
+    api.photoError = null;
+    final area = tester.getRect(find.byKey(const Key('paint-area')));
+    await tester.tapAt(area.center);
+    await tester.pump();
+    await _scrollTo(tester, const Key('photo-submit'));
+    await tester.tap(find.byKey(const Key('photo-submit')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
+    expect(api.sentMask!.sublist(0, 8), _pngSignature);
+    expect(api.photoCalls, 2);
+  });
+
+  testWidgets('an automatic result can be redone by marking the rice by hand', (
+    tester,
+  ) async {
+    await openAuto(tester);
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('photo-paint-instead')));
+    await tester.tap(find.byKey(const Key('photo-paint-instead')));
+    await tester.pump();
+    expect(find.byKey(const Key('paint-area')), findsOneWidget);
+    expect(find.text('Paint the rice first'), findsOneWidget);
+  });
+
+  testWidgets('painting on the photo does not scroll the page', (tester) async {
+    await openAuto(tester, autoMask: false);
+    tester.view.physicalSize = const Size(400, 700);
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('paint-area')));
+    final before = tester.getRect(find.byKey(const Key('paint-area')));
+    await tester.dragFrom(before.center, const Offset(0, -120));
+    await tester.pump();
+    expect(tester.getRect(find.byKey(const Key('paint-area'))), before);
+    expect(find.text('Make the change'), findsOneWidget);
+  });
+
+  testWidgets('servers without automatic rice finding keep the painted flow '
+      'and do not offer two changes', (tester) async {
+    await openAuto(tester, autoMask: false);
+    expect(
+      find.byKey(const Key('photo-change-brown_rice+extra_vegetables')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const Key('photo-gallery')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('paint-area')));
+  });
+
+  testWidgets('Meals review shows a real edited picture of the meal when the '
+      'server finds the rice itself', (tester) async {
+    final api = FakeApi()..autoMask = true;
+    tester.view.physicalSize = const Size(390, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
+    await tester.pumpAndSettle();
+    await selectMeal(tester);
+    await tapKey(tester, 'change-brown_rice');
+    await tapKey(tester, 'change-sauce_on_side');
+    expect(find.text('Generate preview'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('submit')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('meal-picture')));
+
+    expect(api.sentPhotoChange, 'brown_rice');
+    expect(api.sentMask, isNull);
+    expect(api.sentPhoto!.sublist(0, 8), _pngSignature);
+    expect(find.text('Your preview'), findsOneWidget);
+    expect(find.textContaining('No picture'), findsNothing);
+    expect(find.textContaining('not reviewed by a person'), findsOneWidget);
+    expect(find.byKey(const Key('picture-not-shown')), findsOneWidget);
+    expect(find.text('Reference photo · Unchanged'), findsOneWidget);
+  });
+
+  testWidgets('Meals review falls back to the honest summary when no picture '
+      'can be made', (tester) async {
+    final api = FakeApi()
+      ..autoMask = true
+      ..photoError = 'We could not find rice in this photo.'
+      ..photoErrorCode = 'rice_not_found';
+    tester.view.physicalSize = const Size(390, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
+    await tester.pumpAndSettle();
+    await selectMeal(tester);
+    await tapKey(tester, 'change-brown_rice');
+    await tester.tap(find.byKey(const Key('submit')));
+    await tester.pump();
+    await _pumpUntil(tester, find.byKey(const Key('picture-note')));
+    expect(find.text('Your meal request'), findsOneWidget);
+    expect(find.byKey(const Key('meal-picture')), findsNothing);
+    expect(find.textContaining('No picture'), findsWidgets);
   });
 }

@@ -572,7 +572,7 @@ class BuiltinSgeditAdapterTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"WORKER_RUN_DIR": run_dir, "WORKER_FIXTURE_DIR": ""}):
             art = gpu_worker.run_photo_pipeline("brown_rice", image, mask)
         self.assertEqual(art["provider"], "tailscale-gpu-worker")
-        self.assertIn("your photo", art["generated_label"])
+        self.assertIn("this photo", art["generated_label"])
         self.assertIn("not", art["generated_label"].lower())
         (req,) = self.checker_requests
         self.assertEqual((req["task"], req["source"]), ("T2", "rice"))

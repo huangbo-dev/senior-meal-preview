@@ -101,6 +101,7 @@ class CatalogCapabilities {
     this.symbolicPreview = true,
     this.gpuPreview = false,
     this.photoUpload = false,
+    this.autoMask = false,
   });
 
   /// Whether deterministic symbolic plate illustrations are available.
@@ -112,6 +113,10 @@ class CatalogCapabilities {
   /// Whether `POST /api/v1/photo-preview` can edit a photo the user takes.
   final bool photoUpload;
 
+  /// Whether the server finds the rice in a photo itself, so nothing has to
+  /// be painted and two changes can be made to one photo.
+  final bool autoMask;
+
   /// Decodes [CatalogCapabilities] from the optional `capabilities` JSON map.
   factory CatalogCapabilities.fromJson(Object? json) => switch (json) {
     null => const CatalogCapabilities(),
@@ -119,6 +124,7 @@ class CatalogCapabilities {
       CatalogCapabilities(
         gpuPreview: gpu,
         photoUpload: (json as Map)['photo_upload'] == true,
+        autoMask: json['photo_upload'] == true && json['auto_mask'] == true,
       ),
     _ => throw const FormatException('Symbolic preview must remain enabled.'),
   };
@@ -373,10 +379,23 @@ void _requireIllustrativeSchema(Map<String, dynamic> json) {
 
 /// A change the model can make to a user's own photo (research tasks only).
 class PhotoChange {
-  const PhotoChange(this.id, this.label, this.paintHint, this.typicalSeconds);
+  const PhotoChange(this.ids, this.label, this.paintHint, this.typicalSeconds);
 
-  /// Catalog change identifier sent to the API.
-  final String id;
+  /// Catalog change identifiers sent to the API. Two need a server that
+  /// finds the rice itself.
+  final List<String> ids;
+
+  /// Stable name for keys: the identifiers joined with `+`.
+  String get id => ids.join('+');
+
+  /// Whether the change can be made inside one painted area.
+  bool get paintable => ids.length == 1;
+
+  /// Changes whose result is a picture, from a meal's chosen change [ids].
+  static List<String> picturable(Iterable<String> ids) => [
+    for (final id in ids)
+      if (id == 'brown_rice' || id == 'extra_vegetables') id,
+  ];
 
   /// Short label shown on the choice.
   final String label;
@@ -390,17 +409,23 @@ class PhotoChange {
 
   static const all = [
     PhotoChange(
-      'brown_rice',
+      ['brown_rice'],
       'Swap white rice for brown rice',
       'Paint over the white rice only. Keep off the plate and other food.',
       4,
     ),
     PhotoChange(
-      'extra_vegetables',
+      ['extra_vegetables'],
       'Add some broccoli',
       'Paint one small patch on the rice where the broccoli should sit. '
           'Do not paint all the rice.',
       15,
+    ),
+    PhotoChange(
+      ['brown_rice', 'extra_vegetables'],
+      'Both: brown rice with broccoli',
+      '',
+      20,
     ),
   ];
 }

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -126,12 +127,17 @@ class _StrokePainter extends CustomPainter {
 
 enum _Stage { choose, paint, working, result }
 
-/// Take or choose a meal photo, paint the rice, and get the model's edit back.
+/// Take or choose a meal photo and get the edited photo back.
+///
+/// When the server finds the rice itself ([autoMask]) nothing is painted: the
+/// photo is sent as soon as it is chosen. Painting remains as a fallback when
+/// the rice is not found, and as the only way on servers without that ability.
 class PhotoEditPage extends StatefulWidget {
   const PhotoEditPage({
     super.key,
     required this.api,
     required this.available,
+    this.autoMask = false,
     this.picker = pickWithImagePicker,
     this.onBackToMeals,
   });
@@ -143,6 +149,9 @@ class PhotoEditPage extends StatefulWidget {
 
   /// Whether the server advertised `photo_upload` (a real model is connected).
   final bool available;
+
+  /// Whether the server advertised `auto_mask` (it finds the rice itself).
+  final bool autoMask;
   final PhotoPicker picker;
 
   @override
@@ -204,6 +213,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _preparing = false;
         _stage = _Stage.paint;
       });
+      if (widget.autoMask) unawaited(_submit(painted: false));
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -215,20 +225,21 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     }
   }
 
-  Future<void> _submit() async {
+  /// Sends the photo. With [painted] the strokes mark the area to change;
+  /// otherwise the server finds the rice itself.
+  Future<void> _submit({bool painted = true}) async {
     final photo = _photo;
-    if (photo == null || _strokes.isEmpty) return;
+    if (photo == null || (painted && _strokes.isEmpty)) return;
     setState(() {
       _stage = _Stage.working;
       _error = null;
     });
     _startWaiting();
     try {
-      final mask = await maskPng(_strokes);
       final result = await widget.api.editPhoto(
-        changeId: _change.id,
+        changeIds: _change.ids,
         imagePng: photo,
-        maskPng: mask,
+        maskPng: painted ? await maskPng(_strokes) : null,
       );
       _stopWaiting();
       if (!mounted) return;
@@ -239,14 +250,38 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     } catch (error) {
       _stopWaiting();
       if (!mounted) return;
+      final message = error is ApiException
+          ? error.message
+          : 'Something went wrong. Please try again.';
+      final riceNotFound =
+          error is ApiException && error.code == 'rice_not_found';
       setState(() {
-        _stage = _Stage.paint;
-        _error = error is ApiException
-            ? error.message
-            : 'Something went wrong. Please try again.';
+        if (painted) {
+          _stage = _Stage.paint;
+          _error = message;
+        } else if (riceNotFound && _change.paintable) {
+          // Let the user show where the rice is instead of giving up.
+          _stage = _Stage.paint;
+          _error =
+              'We could not find the rice by ourselves. Paint over it below, '
+              'or use a different photo.';
+        } else {
+          _stage = _Stage.choose;
+          _photo = null;
+          _error = message;
+        }
       });
     }
   }
+
+  /// From a result the user is unhappy with: mark the area by hand instead.
+  void _paintInstead() => setState(() {
+    _stage = _Stage.paint;
+    _result = null;
+    _error = null;
+    _strokes.clear();
+    _revision++;
+  });
 
   void _startOver() => setState(() {
     _stage = _Stage.choose;
@@ -330,8 +365,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     const StepHeading('Change your own meal photo'),
     const SizedBox(height: 8),
     Text(
-      'Take a photo of a rice meal, mark the rice, and see one change made '
-      'to it.',
+      widget.autoMask
+          ? 'Take a photo of a rice meal and see a healthier version of it. '
+                'The rice is found for you.'
+          : 'Take a photo of a rice meal, mark the rice, and see one change '
+                'made to it.',
       style: Theme.of(context).textTheme.bodyLarge,
     ),
     const SizedBox(height: 16),
@@ -351,12 +389,13 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       child: Column(
         children: [
           for (final change in PhotoChange.all)
-            RadioListTile<PhotoChange>(
-              key: Key('photo-change-${change.id}'),
-              value: change,
-              title: Text(change.label),
-              contentPadding: EdgeInsets.zero,
-            ),
+            if (widget.autoMask || change.paintable)
+              RadioListTile<PhotoChange>(
+                key: Key('photo-change-${change.id}'),
+                value: change,
+                title: Text(change.label),
+                contentPadding: EdgeInsets.zero,
+              ),
         ],
       ),
     ),
@@ -403,22 +442,33 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
           borderRadius: BorderRadius.circular(AppRadius.plateCard),
           child: SizedBox.square(
             dimension: side,
-            child: GestureDetector(
-              key: const Key('paint-area'),
-              onPanStart: (d) => _addPoint(d.localPosition, side, start: true),
-              onPanUpdate: (d) => _addPoint(d.localPosition, side),
-              onTapDown: (d) => _addPoint(d.localPosition, side, start: true),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.memory(
-                    _photo!,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    semanticLabel: 'Your meal photo',
-                  ),
-                  CustomPaint(painter: _StrokePainter(_strokes, _revision)),
-                ],
+            // The page scrolls, and a scroll view would take every vertical
+            // drag that starts on the photo. The eager recognizer claims
+            // touches on the photo at once, so painting never scrolls the page.
+            child: RawGestureDetector(
+              gestures: {
+                EagerGestureRecognizer:
+                    GestureRecognizerFactoryWithHandlers<
+                      EagerGestureRecognizer
+                    >(EagerGestureRecognizer.new, (_) {}),
+              },
+              child: Listener(
+                key: const Key('paint-area'),
+                onPointerDown: (e) =>
+                    _addPoint(e.localPosition, side, start: true),
+                onPointerMove: (e) => _addPoint(e.localPosition, side),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(
+                      _photo!,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      semanticLabel: 'Your meal photo',
+                    ),
+                    CustomPaint(painter: _StrokePainter(_strokes, _revision)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -546,7 +596,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       ],
     );
     return [
-      StepHeading(result.editTarget.label),
+      StepHeading(_change.label),
       const SizedBox(height: 12),
       labelled('Before', _photo!, 'Your original photo'),
       const SizedBox(height: 16),
@@ -574,6 +624,12 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
         _againButton(),
         const SizedBox(height: 8),
       ],
+      if (widget.autoMask && _change.paintable)
+        TextButton(
+          key: const Key('photo-paint-instead'),
+          onPressed: _paintInstead,
+          child: const Text('Not right? Mark the rice yourself'),
+        ),
       TextButton(
         key: const Key('photo-back-to-meals'),
         onPressed:

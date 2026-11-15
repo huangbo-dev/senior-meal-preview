@@ -156,6 +156,9 @@ pub struct Capabilities {
     /// `POST /api/v1/photo-preview` can edit a user-taken photo (same readiness probe as
     /// `gpu_preview`). Additive to schema v1.
     pub photo_upload: bool,
+    /// `POST /api/v1/photo-preview` works without `mask_png_base64`: the worker finds the rice
+    /// itself and can apply two changes to one photo. Additive to schema v1.
+    pub auto_mask: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -234,6 +237,7 @@ fn build_catalog() -> Catalog {
             symbolic_preview: true,
             gpu_preview: false,
             photo_upload: false,
+            auto_mask: false,
         },
         notice: NOTICE,
     }
@@ -283,7 +287,7 @@ pub struct PreviewRequest {
     pub render_mode: RenderMode,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EditTarget {
     id: &'static str,
     label: &'static str,
@@ -436,7 +440,12 @@ fn worker_error(failure: WorkerFailure) -> ApiError {
         WorkerFailure::BadPhoto => ApiError::new(
             StatusCode::BAD_REQUEST,
             "photo_invalid",
-            "The photo or the painted area could not be used. Paint over the rice only, then try again.",
+            "The photo could not be used. Please try again, or use a different photo.",
+        ),
+        WorkerFailure::RiceNotFound => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "rice_not_found",
+            "We could not find rice in this photo. Try a clearer photo of a rice meal.",
         ),
     }
 }
@@ -573,19 +582,29 @@ const PNG_B64_PREFIX: &str = "iVBORw0KGgo";
 /// Changes the model was evaluated on, the only ones offered for a user photo.
 pub const PHOTO_CHANGE_IDS: [&str; 2] = ["brown_rice", "extra_vegetables"];
 
-/// A user-taken photo plus the painted area to change. Unknown fields are rejected.
+/// A photo and the rice changes to make to it. Send `change_ids` (one or two) or the older
+/// single `change_id`, not both. `mask_png_base64` is optional: without it the worker finds the
+/// rice itself; with it (a user-painted area) exactly one change is allowed. Unknown fields are
+/// rejected.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhotoPreviewRequest {
-    pub change_id: String,
+    #[serde(default)]
+    pub change_id: Option<String>,
+    #[serde(default)]
+    pub change_ids: Option<Vec<String>>,
     pub image_png_base64: String,
-    pub mask_png_base64: String,
+    #[serde(default)]
+    pub mask_png_base64: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PhotoPreview {
     schema_version: u8,
+    /// The first requested change (kept for clients that send one `change_id`).
     edit_target: EditTarget,
+    /// Every requested change, in request order.
+    edit_targets: Vec<EditTarget>,
     notices: Vec<&'static str>,
     pub gpu_artifact: GpuArtifact,
 }
@@ -620,26 +639,60 @@ async fn photo_preview(
             "The request does not match the photo-preview format.",
         ),
     })?;
-    if !PHOTO_CHANGE_IDS.contains(&request.change_id.as_str()) {
+    let change_ids = match (request.change_id, request.change_ids) {
+        (Some(id), None) => vec![id],
+        (None, Some(ids)) => ids,
+        _ => {
+            return Err(ApiError::invalid(
+                "unsupported_change",
+                "Choose brown rice, added vegetables, or both.",
+            ));
+        }
+    };
+    let painted = request.mask_png_base64.is_some();
+    if change_ids.is_empty()
+        || change_ids.len() > if painted { 1 } else { PHOTO_CHANGE_IDS.len() }
+        || change_ids
+            .iter()
+            .enumerate()
+            .any(|(i, id)| !PHOTO_CHANGE_IDS.contains(&id.as_str()) || change_ids[..i].contains(id))
+    {
         return Err(ApiError::invalid(
             "unsupported_change",
-            "For your own photo, choose brown rice or added vegetables.",
+            if painted {
+                "For a painted area, choose brown rice or added vegetables."
+            } else {
+                "Choose brown rice, added vegetables, or both."
+            },
         ));
     }
     if !looks_like_png_base64(&request.image_png_base64)
-        || !looks_like_png_base64(&request.mask_png_base64)
+        || request
+            .mask_png_base64
+            .as_deref()
+            .is_some_and(|mask| !looks_like_png_base64(mask))
     {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "photo_invalid",
-            "The photo or the painted area could not be used. Paint over the rice only, then try again.",
+            "The photo could not be used. Please try again, or use a different photo.",
         ));
     }
-    let change = CATALOG
-        .changes
+    let targets: Vec<EditTarget> = change_ids
         .iter()
-        .find(|c| c.id == request.change_id)
-        .expect("photo change ids are catalog changes");
+        .map(|id| {
+            let change = CATALOG
+                .changes
+                .iter()
+                .find(|c| c.id == id)
+                .expect("photo change ids are catalog changes");
+            EditTarget {
+                id: change.id,
+                label: change.label,
+                description: change.description,
+            }
+        })
+        .collect();
     let Some(ref worker_cfg) = config.gpu_worker else {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -649,7 +702,7 @@ async fn photo_preview(
     };
     let payload = WorkerPhotoRequest {
         schema_version: 1,
-        change_id: request.change_id,
+        change_ids,
         image_png_base64: request.image_png_base64,
         mask_png_base64: request.mask_png_base64,
     };
@@ -658,14 +711,11 @@ async fn photo_preview(
         .map_err(worker_error)?;
     Ok(Json(PhotoPreview {
         schema_version: 1,
-        edit_target: EditTarget {
-            id: change.id,
-            label: change.label,
-            description: change.description,
-        },
+        edit_target: targets[0].clone(),
+        edit_targets: targets,
         notices: vec![
-            "Experimental edit of your photo. No person has checked it.",
-            "Your photo is deleted after the edit and is not saved.",
+            "Experimental edit of the photo. No person has checked it.",
+            "The photo is deleted from the server after the edit and is not saved.",
             NOTICE,
         ],
         gpu_artifact: artifact,
@@ -713,6 +763,7 @@ pub fn app_with_config(config: RuntimeConfig) -> Router {
                 };
                 let mut catalog = catalog_for(ready.gpu_preview);
                 catalog.capabilities.photo_upload = ready.photo_upload;
+                catalog.capabilities.auto_mask = ready.auto_mask;
                 Json(catalog)
             }),
         )

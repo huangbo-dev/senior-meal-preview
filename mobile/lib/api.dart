@@ -19,12 +19,15 @@ abstract interface class MealApi {
     String renderMode = 'illustrative_only',
   });
 
-  /// Asks `POST /api/v1/photo-preview` to apply [changeId] inside the painted
-  /// [maskPng] of [imagePng]. Both are PNG bytes of the same square size.
+  /// Asks `POST /api/v1/photo-preview` to apply [changeIds] to [imagePng].
+  ///
+  /// Without [maskPng] the server finds the rice itself and accepts one or
+  /// two changes. With a painted [maskPng] (PNG bytes of the same square size
+  /// as the photo) exactly one change is allowed.
   Future<PhotoEditResult> editPhoto({
-    required String changeId,
+    required List<String> changeIds,
     required Uint8List imagePng,
-    required Uint8List maskPng,
+    Uint8List? maskPng,
   });
 
   /// Releases any underlying HTTP client resources.
@@ -34,10 +37,13 @@ abstract interface class MealApi {
 /// User-facing exception thrown when an API request fails or returns invalid data.
 class ApiException implements Exception {
   /// Creates an [ApiException] with a plain-language [message].
-  const ApiException(this.message);
+  const ApiException(this.message, {this.code});
 
   /// Actionable error message safe to display in a notice banner.
   final String message;
+
+  /// The API's machine-readable `error.code`, when the server sent one.
+  final String? code;
 
   @override
   String toString() => message;
@@ -138,17 +144,22 @@ class HttpMealApi implements MealApi {
 
   @override
   Future<PhotoEditResult> editPhoto({
-    required String changeId,
+    required List<String> changeIds,
     required Uint8List imagePng,
-    required Uint8List maskPng,
+    Uint8List? maskPng,
   }) => _perform(
     () => _client.post(
       _endpoint('/api/v1/photo-preview'),
       headers: _headers(jsonBody: true),
       body: jsonEncode({
-        'change_id': changeId,
+        // A painted mask uses the original single-change form, which servers
+        // without automatic rice finding also accept.
+        if (maskPng != null) ...{
+          'change_id': changeIds.single,
+          'mask_png_base64': base64Encode(maskPng),
+        } else
+          'change_ids': changeIds,
         'image_png_base64': base64Encode(imagePng),
-        'mask_png_base64': base64Encode(maskPng),
       }),
     ),
     PhotoEditResult.fromJson,
@@ -163,7 +174,7 @@ class HttpMealApi implements MealApi {
     try {
       final response = await request().timeout(limit ?? timeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw ApiException(_errorMessage(response));
+        throw ApiException(_errorMessage(response), code: _errorCode(response));
       }
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       return decode(body);
@@ -203,6 +214,19 @@ class HttpMealApi implements MealApi {
     return response.statusCode == 408
         ? 'This is taking too long. Please try again.'
         : 'That did not work. Please try again.';
+  }
+
+  static String? _errorCode(http.Response response) {
+    try {
+      if (jsonDecode(response.body) case {
+        'error': {'code': final String code},
+      }) {
+        return code;
+      }
+    } on FormatException {
+      // No structured error body.
+    }
+    return null;
   }
 
   @override

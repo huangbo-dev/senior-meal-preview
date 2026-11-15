@@ -40,25 +40,32 @@ class FakeApi implements MealApi {
   Completer<MealPreview>? pending;
   Completer<Catalog>? pendingCatalog;
   bool photoUpload = true;
+  bool autoMask = false;
+  int photoCalls = 0;
   String? photoError;
+  String? photoErrorCode;
   String? sentPhotoChange;
   Uint8List? sentPhoto;
   Uint8List? sentMask;
 
   @override
   Future<PhotoEditResult> editPhoto({
-    required String changeId,
+    required List<String> changeIds,
     required Uint8List imagePng,
-    required Uint8List maskPng,
+    Uint8List? maskPng,
   }) async {
+    final changeId = changeIds.join('+');
+    photoCalls++;
     sentPhotoChange = changeId;
     sentPhoto = imagePng;
     sentMask = maskPng;
-    if (photoError != null) throw ApiException(photoError!);
+    if (photoError != null) {
+      throw ApiException(photoError!, code: photoErrorCode);
+    }
     return PhotoEditResult.fromJson({
       'schema_version': 1,
       'edit_target': {
-        'id': changeId,
+        'id': changeIds.first,
         'label': 'Brown rice',
         'description': 'White rice swapped for brown rice',
       },
@@ -91,6 +98,7 @@ class FakeApi implements MealApi {
           'symbolic_preview': true,
           'gpu_preview': gpuPreviewEnabled,
           'photo_upload': true,
+          'auto_mask': autoMask,
         },
       });
     }

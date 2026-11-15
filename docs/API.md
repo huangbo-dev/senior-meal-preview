@@ -57,19 +57,22 @@ Errors do not echo submitted content. Repeating a valid request returns the same
 
 ## POST /api/v1/photo-preview
 
-Edits a photo the user took. Body limit 8 MiB (other routes stay at 16 KiB). Unknown fields are rejected.
+Edits a photo: one the user took, or a meal's reference photo sent by the app. Body limit 8 MiB (other routes stay at 16 KiB). Unknown fields are rejected.
 
 ```json
+{"change_ids":["brown_rice","extra_vegetables"],"image_png_base64":"iVBORw0KGgo…"}
 {"change_id":"brown_rice","image_png_base64":"iVBORw0KGgo…","mask_png_base64":"iVBORw0KGgo…"}
 ```
 
-- `change_id`: `brown_rice` or `extra_vegetables` only (the two research tasks), one per request.
+- `change_ids`: one or two different values from `brown_rice` and `extra_vegetables`. The older single `change_id` is still accepted; send one of the two fields, not both.
 - `image_png_base64`: square PNG. The app centre-crops and re-encodes it at 1024×1024 on the phone, which drops EXIF/GPS metadata.
-- `mask_png_base64`: same-size PNG, white where the user painted the rice. The worker requires 0.5–85 % coverage.
+- `mask_png_base64`: optional. Without it the worker finds the rice itself (needs `capabilities.auto_mask`; app photo methods only): brown rice recolours all the rice, broccoli goes on one patch inside it, and with both the broccoli is added first. With it (same-size PNG, white where the user painted, 0.5–85 % coverage) exactly one change is allowed.
 
-Success returns `schema_version: 1`, `edit_target`, `notices` and a `gpu_artifact` (same schema as above, `generated_label` begins "Experimental AI edit of your photo, not reviewed by a person"). The worker writes the photo only to a per-request temporary directory and deletes it afterwards; `WORKER_RUN_DIR` is ignored for user photos. Nothing is stored by the gateway.
+Success returns `schema_version: 1`, `edit_target` (the first requested change), `edit_targets` (all of them), `notices` and a `gpu_artifact` (same schema as above; `generated_label` says whether the result is a recolour, an AI edit, or both, and always that no person reviewed it). With two changes `attempts` is the total and `checker_passed` is true only if every step passed. The worker writes the photo only to a per-request temporary directory and deletes it afterwards; `WORKER_RUN_DIR` is ignored for user photos. Nothing is stored by the gateway.
 
-Errors: `400 unsupported_change`, `400 photo_invalid` (gateway check or worker could not use the photo/mask), `503 gpu_unavailable` (no worker), plus the GPU errors listed above. `GET /api/v1/catalog` advertises `capabilities.photo_upload` from the worker's `photo_ready` health field, separately from `gpu_preview`.
+Errors: `400 unsupported_change`, `400 photo_invalid` (gateway check or worker could not use the photo/mask), `422 rice_not_found` (no mask was sent and the worker found no rice; the app then offers painting), `503 gpu_unavailable` (no worker), plus the GPU errors listed above. `GET /api/v1/catalog` advertises `capabilities.photo_upload` from the worker's `photo_ready` health field, separately from `gpu_preview`, and `capabilities.auto_mask` from `auto_mask_ready`.
+
+The rice finder is CLIPSeg (`CIDAS/clipseg-rd64-refined`) for a coarse location and SAM (`facebook/sam-vit-base`) for the outline, loaded from the Hugging Face cache directory in `WORKER_SEGMENTER_CACHE` and never downloaded at run time. Its thresholds were set by eye on five photos on 15 Nov 2026; it is not evaluated.
 
 Quality: on 12 Nov 2026 a public Wikimedia chicken rice photo, brown-rice request, passed the checker in one attempt (≈15 s through the tunnel) but replaced the rice dome with a patterned bowl of grain and garnish. Treat results as unreviewed experiments, for project-team use only.
 
