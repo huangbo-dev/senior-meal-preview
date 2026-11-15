@@ -117,6 +117,10 @@ void main() {
     await _pumpUntil(tester, find.byKey(const Key('paint-area')));
     expect(asked, ImageSource.camera);
 
+    expect(find.text('Check the crop first'), findsOneWidget);
+    await _scrollTo(tester, const Key('photo-confirm-crop'));
+    await tester.tap(find.byKey(const Key('photo-confirm-crop')));
+    await tester.pump();
     // Nothing painted yet: cannot submit.
     await _scrollTo(tester, const Key('photo-submit'));
     expect(find.text('Paint the rice first'), findsOneWidget);
@@ -127,8 +131,9 @@ void main() {
     await tester.pump();
     await _scrollTo(tester, const Key('photo-submit'));
     await tester.tap(find.byKey(const Key('photo-submit')));
+    await tester.tap(find.byKey(const Key('photo-submit'))); // stale double tap
     await tester.pump();
-    await _pumpUntil(tester, find.byKey(const Key('photo-result-label')));
+    await _pumpUntil(tester, find.byKey(const Key('photo-check-status')));
 
     expect(api.sentPhotoChange, 'brown_rice');
     expect(api.sentPhoto!.sublist(0, 8), _pngSignature);
@@ -159,6 +164,28 @@ void main() {
     expect(find.text('After'), findsOneWidget);
     expect(find.textContaining('not reviewed by a person'), findsWidgets);
     expect(find.textContaining('not a human review'), findsOneWidget);
+    final firstPhoto = Uint8List.fromList(api.sentPhoto!);
+    final firstMask = Uint8List.fromList(api.sentMask!);
+    expect(find.byKey(const Key('photo-check-status')), findsOneWidget);
+    await _scrollTo(tester, const Key('photo-adjust-mask'), up: true);
+    await tester.tap(find.byKey(const Key('photo-adjust-mask')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('paint-area')), findsOneWidget);
+    await _scrollTo(tester, const Key('photo-submit'));
+    api.photoCheckerPassed = false;
+    await tester.tap(find.byKey(const Key('photo-submit')));
+    await tester.pump();
+    await _pumpUntil(tester, find.textContaining('Unverified preview'));
+    expect(api.sentPhoto, firstPhoto);
+    expect(api.sentMask, firstMask);
+    expect(api.photoCalls, 2);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('photo-check-status'))).dy,
+      lessThan(tester.getTopLeft(find.byType(SegmentedButton<bool>)).dy),
+    );
+    await tester.tap(find.text('Before'));
+    await tester.pump();
+    expect(find.text('Original photo'), findsOneWidget);
   });
 
   testWidgets('server refusal keeps the photo and painting for another try', (
@@ -181,6 +208,10 @@ void main() {
     await tester.tap(find.byKey(const Key('photo-gallery')));
     await tester.pump();
     await _pumpUntil(tester, find.byKey(const Key('paint-area')));
+    await _scrollTo(tester, const Key('photo-confirm-crop'));
+    await tester.tap(find.byKey(const Key('photo-confirm-crop')));
+    await tester.pump();
+    await _scrollTo(tester, const Key('paint-area'), up: true);
     final area = tester.getRect(find.byKey(const Key('paint-area')));
     await tester.tapAt(area.center);
     await tester.pump();

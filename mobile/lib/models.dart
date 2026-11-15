@@ -391,7 +391,7 @@ class PhotoChange {
   static const all = [
     PhotoChange(
       'brown_rice',
-      'Swap white rice for brown rice',
+      'Preview brown-rice colour (not new grains)',
       'Paint over the white rice only. Keep off the plate and other food.',
       4,
     ),

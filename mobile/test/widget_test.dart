@@ -40,6 +40,8 @@ class FakeApi implements MealApi {
   Completer<MealPreview>? pending;
   Completer<Catalog>? pendingCatalog;
   bool photoUpload = true;
+  bool photoCheckerPassed = true;
+  int photoCalls = 0;
   String? photoError;
   String? sentPhotoChange;
   Uint8List? sentPhoto;
@@ -51,6 +53,7 @@ class FakeApi implements MealApi {
     required Uint8List imagePng,
     required Uint8List maskPng,
   }) async {
+    photoCalls++;
     sentPhotoChange = changeId;
     sentPhoto = imagePng;
     sentMask = maskPng;
@@ -69,7 +72,7 @@ class FakeApi implements MealApi {
         'prompt_id': 'sgedit-v1:tuned:T2/rice:ladder0:g7.5',
         'seed': 1,
         'attempts': 2,
-        'checker_passed': true,
+        'checker_passed': photoCheckerPassed,
         'image_data_url': 'data:image/png;base64,$tinyPngB64',
         'generated_label':
             'Experimental AI edit of your photo, not reviewed by a person',
@@ -636,7 +639,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.widget<StepProgress>(find.byType(StepProgress)).step, 0);
-      expect(find.text('Choose a meal to personalise.'), findsOneWidget);
+      expect(
+        find.text('Explore meal requests using reference photos.'),
+        findsOneWidget,
+      );
 
       await selectMeal(tester);
       expect(tester.widget<StepProgress>(find.byType(StepProgress)).step, 1);
@@ -718,7 +724,7 @@ void main() {
       await tapKey(tester, 'preferences-open');
       expect(
         find.text(
-          'A texture request only. This does not check swallowing safety.',
+          'Request summary only: soft texture is not applied by the built-in image model and does not check swallowing safety.',
         ),
         findsOneWidget,
       );
@@ -988,4 +994,23 @@ void main() {
       expect(find.text('Optional · No preference'), findsOneWidget);
     },
   );
+
+  testWidgets('unsupported catalogue AI combinations stay local', (
+    tester,
+  ) async {
+    final api = FakeApi()..gpuPreviewEnabled = true;
+    await tester.pumpWidget(MealPreviewApp(api: api, initialTab: AppTab.meals));
+    await tester.pumpAndSettle();
+    await selectMeal(tester);
+    await tapKey(tester, 'change-brown_rice');
+    await tapKey(tester, 'change-extra_vegetables');
+    await tapKey(tester, 'render-gpu');
+    await tapKey(tester, 'submit');
+    expect(api.previewCalls, 0);
+    expect(find.textContaining('AI preview supports one'), findsOneWidget);
+    await tapKey(tester, 'render-illustrative');
+    await tapKey(tester, 'submit');
+    expect(api.previewCalls, 1);
+    expect(api.sentRenderMode, 'illustrative_only');
+  });
 }

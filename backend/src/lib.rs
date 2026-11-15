@@ -665,7 +665,7 @@ async fn photo_preview(
         },
         notices: vec![
             "Experimental edit of your photo. No person has checked it.",
-            "Your photo is deleted after the edit and is not saved.",
+            "Temporary processing files are cleaned after normal processing. Cleanup after a crash is not guaranteed.",
             NOTICE,
         ],
         gpu_artifact: artifact,

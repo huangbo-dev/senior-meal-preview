@@ -153,6 +153,17 @@ class _MealFlowState extends State<MealFlow> {
       });
       return;
     }
+    if (_renderMode == 'gpu_assisted' &&
+        (_changes.length != 1 ||
+            !_changes.every(
+              (id) => id == 'brown_rice' || id == 'extra_vegetables',
+            ))) {
+      setState(
+        () => _error =
+            'AI preview supports one brown-rice or vegetable change. Choose Summary only for sauce or combined requests.',
+      );
+      return;
+    }
     final version = ++_requestVersion;
     setState(() {
       _submitting = true;
@@ -517,12 +528,12 @@ class _MealFlowState extends State<MealFlow> {
     StepHeading('Meals', focusNode: _headingFocus),
     const SizedBox(height: 8),
     Text(
-      'Choose a meal to personalise.',
+      'Explore meal requests using reference photos.',
       style: Theme.of(context).textTheme.bodyLarge,
     ),
     const SizedBox(height: 8),
     Text(
-      '${_catalog!.dishes.length} meals · Reference photos',
+      '${_catalog!.dishes.length} meals · Summary by default, photos unchanged',
       key: const Key('demo-callout'),
       style: Theme.of(context).textTheme.bodyMedium,
     ),
@@ -807,7 +818,7 @@ class _MealFlowState extends State<MealFlow> {
         PreferenceGroup(
           title: 'Texture',
           helper:
-              'A texture request only. This does not check swallowing safety.',
+              'Request summary only: soft texture is not applied by the built-in image model and does not check swallowing safety.',
           enabled: !_submitting,
           options: [
             PreferenceOption(
@@ -833,7 +844,8 @@ class _MealFlowState extends State<MealFlow> {
         ),
         PreferenceGroup(
           title: 'Flavour',
-          helper: 'Ingredients are not checked.',
+          helper:
+              'Request summary only: mild flavour is not applied by the built-in image model. Ingredients are not checked.',
           enabled: !_submitting,
           options: [
             PreferenceOption(
@@ -861,7 +873,7 @@ class _MealFlowState extends State<MealFlow> {
           PreferenceGroup(
             title: 'Preview mode',
             helper:
-                'AI preview makes a picture from a stock meal photo. If it fails, no picture is shown.',
+                'Built-in AI supports one brown-rice or vegetable change only. Sauce, combined changes and texture/flavour are request-summary options, not generated effects.',
             enabled: !_submitting,
             options: [
               PreferenceOption(

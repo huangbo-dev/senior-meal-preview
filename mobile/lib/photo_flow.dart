@@ -32,7 +32,7 @@ Future<Uint8List?> pickWithImagePicker(ImageSource source) async {
 /// Centre-crops [bytes] to a square and re-encodes it as a [side]×[side] PNG.
 ///
 /// Drawing the decoded pixels into a fresh image drops EXIF, GPS and every other
-/// metadata block, so location never leaves the phone.
+/// metadata block. Visible identifying content in the pixels is not removed.
 Future<Uint8List> squarePng(Uint8List bytes, {int side = photoSide}) async {
   final codec = await ui.instantiateImageCodec(bytes);
   final source = (await codec.getNextFrame()).image;
@@ -157,6 +157,9 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   int _revision = 0;
   bool _bigBrush = true;
   bool _preparing = false;
+  bool _cropConfirmed = false;
+  bool _showAfter = true;
+  final ScrollController _scroll = ScrollController();
   String? _error;
   PhotoEditResult? _result;
   final Stopwatch _waited = Stopwatch();
@@ -165,6 +168,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -199,6 +203,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       if (!mounted) return;
       setState(() {
         _photo = square;
+        _cropConfirmed = false;
         _strokes.clear();
         _revision++;
         _preparing = false;
@@ -217,7 +222,12 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
 
   Future<void> _submit() async {
     final photo = _photo;
-    if (photo == null || _strokes.isEmpty) return;
+    if (_stage != _Stage.paint ||
+        photo == null ||
+        _strokes.isEmpty ||
+        !_cropConfirmed) {
+      return;
+    }
     setState(() {
       _stage = _Stage.working;
       _error = null;
@@ -234,7 +244,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       if (!mounted) return;
       setState(() {
         _result = result;
+        _showAfter = true;
         _stage = _Stage.result;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
       });
     } catch (error) {
       _stopWaiting();
@@ -248,9 +262,16 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     }
   }
 
+  void _adjustMask() => setState(() {
+    _stage = _Stage.paint;
+    _result = null;
+    _error = null;
+  });
+
   void _startOver() => setState(() {
     _stage = _Stage.choose;
     _photo = null;
+    _cropConfirmed = false;
     _result = null;
     _error = null;
     _strokes.clear();
@@ -290,6 +311,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
               maxWidth: AppLayout.maxOuterWidth,
             ),
             child: ListView(
+              controller: _scroll,
               padding: AppLayout.pagePadding,
               children: switch (_stage) {
                 _Stage.choose => _chooseView(),
@@ -306,8 +328,12 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
 
   Widget _submitButton() => AppPrimaryButton(
     key: const Key('photo-submit'),
-    label: _strokes.isEmpty ? 'Paint the rice first' : 'Make the change',
-    onPressed: _strokes.isEmpty ? null : _submit,
+    label: !_cropConfirmed
+        ? 'Check the crop first'
+        : _strokes.isEmpty
+        ? 'Paint the rice first'
+        : 'Make the change',
+    onPressed: !_cropConfirmed || _strokes.isEmpty ? null : _submit,
   );
 
   Widget _againButton() => AppPrimaryButton(
@@ -384,9 +410,11 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     ),
     const SizedBox(height: 20),
     const NoticeCard(
-      'Your photo is cropped to a square and its location data is removed on '
-      'this phone. It is sent to the project server only to make the edit, '
-      'then deleted. Please only use photos of food.',
+      'You will check a square crop before upload. Embedded location metadata '
+      'is removed on this device, but visible people or identifying text are not. '
+      'The project server uses temporary files cleaned after normal processing; '
+      'cleanup after a crash is not guaranteed. Use food-only photos without '
+      'private details.',
       title: 'Privacy',
     ),
   ];
@@ -395,6 +423,10 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     StepHeading(_change.label),
     const SizedBox(height: 6),
     Text(_change.paintHint, style: Theme.of(context).textTheme.bodyLarge),
+    const SizedBox(height: 8),
+    const Text(
+      'Mark only the rice, not chicken, sauce or plate. Use the small brush near edges. Undo removes the last stroke.',
+    ),
     const SizedBox(height: 12),
     LayoutBuilder(
       builder: (context, constraints) {
@@ -424,6 +456,16 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
           ),
         );
       },
+    ),
+    CheckboxListTile(
+      key: const Key('photo-confirm-crop'),
+      contentPadding: EdgeInsets.zero,
+      value: _cropConfirmed,
+      onChanged: (value) => setState(() => _cropConfirmed = value ?? false),
+      title: const Text('This square crop includes the meal I want to edit'),
+      subtitle: const Text(
+        'Edges outside this crop will not be uploaded. If food is cut off, choose a wider photo.',
+      ),
     ),
     const SizedBox(height: 10),
     Wrap(
@@ -516,7 +558,7 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
       const SizedBox(height: 8),
       Text(
         'This change usually takes about $typical seconds. '
-        'A hard one can take up to a minute. The bar is an estimate.',
+        'It can take longer when the server is busy. The bar is an estimate, not server progress.',
         textAlign: TextAlign.center,
       ),
     ];
@@ -548,9 +590,45 @@ class _PhotoEditPageState extends State<PhotoEditPage> {
     return [
       StepHeading(result.editTarget.label),
       const SizedBox(height: 12),
-      labelled('Before', _photo!, 'Your original photo'),
-      const SizedBox(height: 16),
-      labelled('After', edited, result.artifact.generatedLabel),
+      Semantics(
+        liveRegion: true,
+        child: NoticeCard(
+          result.artifact.checkerPassed
+              ? 'Automatic check passed, not independent validation or human approval. Inspect grain size, vegetable placement and changes to chicken, sauce and plate.'
+              : 'Automatic check did not pass. This is an unverified preview, not an accepted result. Adjust the marked area or try another photo.',
+          key: const Key('photo-check-status'),
+          title: result.artifact.checkerPassed
+              ? 'Experimental preview'
+              : 'Unverified preview',
+          error: !result.artifact.checkerPassed,
+        ),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton(
+        key: const Key('photo-adjust-mask'),
+        onPressed: _adjustMask,
+        child: const Text('Adjust the marked area and retry'),
+      ),
+      const SizedBox(height: 12),
+      SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment(value: false, label: Text('Before')),
+          ButtonSegment(value: true, label: Text('After')),
+        ],
+        selected: {_showAfter},
+        onSelectionChanged: (selection) =>
+            setState(() => _showAfter = selection.first),
+      ),
+      const SizedBox(height: 12),
+      labelled(
+        _showAfter ? 'Edited preview' : 'Original photo',
+        _showAfter ? edited : _photo!,
+        _showAfter ? result.artifact.generatedLabel : 'Your original photo',
+      ),
+      const SizedBox(height: 8),
+      const Text(
+        'Switch Before / After to compare at the same size. A picture cannot verify ingredients, nutrition or swallowing safety.',
+      ),
       const SizedBox(height: 10),
       Text(
         result.artifact.generatedLabel,

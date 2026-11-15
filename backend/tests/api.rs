@@ -883,7 +883,11 @@ async fn photo_preview_forwards_a_large_upload_to_the_worker_photo_route() {
     assert_eq!(status, StatusCode::OK, "{value}");
     assert_eq!(value["edit_target"]["id"], "brown_rice");
     assert_eq!(value["gpu_artifact"]["attempts"], 1);
-    assert!(value["notices"].to_string().contains("not saved"));
+    assert!(
+        value["notices"]
+            .to_string()
+            .contains("Cleanup after a crash is not guaranteed")
+    );
     let sent = task.await.unwrap();
     assert!(sent.starts_with("POST /v1/generate-photo HTTP/1.1"));
     assert!(sent.contains("\"change_id\":\"brown_rice\""));
