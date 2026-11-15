@@ -891,7 +891,7 @@ async fn photo_preview_without_a_mask_asks_the_worker_to_find_the_rice() {
     let artifact = json!({
         "provider": "tailscale-gpu-worker",
         "model": "lab-recolour + sdxl+qwen",
-        "prompt_id": "app-v2:blend+app-v2:recolour+automask-v1",
+        "prompt_id": "app-v3:blend+app-v3:recolour+automask-v1",
         "seed": 7,
         "attempts": 2,
         "checker_passed": false,

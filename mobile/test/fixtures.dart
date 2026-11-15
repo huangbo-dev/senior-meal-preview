@@ -19,7 +19,7 @@ final catalogJson = <String, dynamic>{
     {
       'id': 'tofu_rice',
       'name': 'Tofu rice',
-      'description': 'A plant-based rice meal',
+      'description': 'Mapo tofu with steamed rice',
       'color': '#A7BA85',
     },
   ],

@@ -15,7 +15,7 @@ DEST = ROOT / "mobile/assets/meals"
 HASHES = {
     "chicken_rice.jpg": "6b5c3496b82b97f12933c107c851860fd123b86112d46304ee2439b88f729a02",
     "fish_soup.jpg": "3e8f17a130bdfcda8bc7447a248b529f290207dfa134ff132027e5a6b23c3a03",
-    "tofu_rice.jpg": "f2be8f6f9c91e8d06e2c4e3ee6c9910d4395d880f97d6a5b24648c4c4eb709ca",
+    "tofu_rice.jpg": "ff9f69e43ffe2de11794b6870e572c31ae94d1b88c509d6ef40d74dcafd50948",
 }
 
 

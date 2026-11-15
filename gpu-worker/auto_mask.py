@@ -31,6 +31,10 @@ MAX_COVERAGE = 0.6
 # SAM must broadly agree with the CLIPSeg region (intersection over union).
 MIN_AGREEMENT = 0.35
 
+# Broccoli patch radius as a share of the photo side.
+MIN_PATCH = 0.05
+MAX_PATCH = 0.12
+
 _LOCK = threading.Lock()
 _MODELS = None
 
@@ -169,8 +173,14 @@ def broccoli_patch(rice: np.ndarray) -> np.ndarray:
     and the rest of the rice is left as photographed.
     """
     rice = rice.astype(bool)
+    side = rice.shape[0]
     depth = ndi.distance_transform_edt(rice)
     cy, cx = np.unravel_index(np.argmax(depth), depth.shape)
-    radius = float(min(0.75 * depth[cy, cx], 0.12 * rice.shape[0]))
+    # Big enough to hold a few florets even on a thin strip of rice, never huge.
+    radius = float(np.clip(0.75 * depth[cy, cx], MIN_PATCH * side, MAX_PATCH * side))
     yy, xx = np.ogrid[: rice.shape[0], : rice.shape[1]]
-    return ((yy - cy) ** 2 + (xx - cx) ** 2 <= radius * radius) & rice
+    disc = (yy - cy) ** 2 + (xx - cx) ** 2 <= radius * radius
+    # On thin rice the disc may overhang its edge a little; florets resting on the rim look
+    # natural, but the patch never reaches far beyond the rice.
+    near = ndi.binary_dilation(rice, iterations=max(1, int(radius / 2)))
+    return disc & near

@@ -8,18 +8,27 @@ import 'package:flutter/services.dart';
 import 'api.dart';
 import 'models.dart';
 import 'photo_flow.dart';
+import 'picture_store.dart';
 import 'showcase.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
 /// Shown in About; keep in step with `version:` in pubspec.yaml and CHANGELOG.md.
-const appVersion = '0.5.0';
+const appVersion = '0.6.0';
 
 void main() => runApp(const MealPreviewApp());
 
 class MealPreviewApp extends StatelessWidget {
-  const MealPreviewApp({super.key, this.api, this.initialTab = AppTab.photo});
+  const MealPreviewApp({
+    super.key,
+    this.api,
+    this.initialTab = AppTab.photo,
+    this.pictures,
+  });
   final MealApi? api;
+
+  /// Where edited meal pictures are kept; defaults to the phone's storage.
+  final PictureStore? pictures;
 
   /// The tab shown at launch. The own-photo tab is the app's home screen.
   final AppTab initialTab;
@@ -41,20 +50,30 @@ class MealPreviewApp extends StatelessWidget {
                         onPressed: () => Navigator.pop(routeContext),
                       ),
                     ),
-                    body: MealFlow(api: api, initialTab: AppTab.meals),
+                    body: MealFlow(
+                      api: api,
+                      initialTab: AppTab.meals,
+                      pictures: pictures,
+                    ),
                   ),
                 ),
               ),
             ),
           )
-        : MealFlow(api: api, initialTab: initialTab),
+        : MealFlow(api: api, initialTab: initialTab, pictures: pictures),
   );
 }
 
 class MealFlow extends StatefulWidget {
-  const MealFlow({super.key, this.api, this.initialTab = AppTab.photo});
+  const MealFlow({
+    super.key,
+    this.api,
+    this.initialTab = AppTab.photo,
+    this.pictures,
+  });
   final MealApi? api;
   final AppTab initialTab;
+  final PictureStore? pictures;
   @override
   State<MealFlow> createState() => _MealFlowState();
 }
@@ -84,6 +103,15 @@ class _MealFlowState extends State<MealFlow> {
   PhotoEditResult? _picture;
   Uint8List? _pictureBytes;
 
+  /// When the shown picture was made, if it was saved from an earlier visit.
+  DateTime? _pictureSavedAt;
+  late final PictureStore _pictures = widget.pictures ?? FilePictureStore();
+
+  /// Time spent waiting for a new meal picture, shown as a progress bar.
+  final Stopwatch _pictureWait = Stopwatch();
+  Timer? _pictureTicker;
+  bool _makingPicture = false;
+
   /// Why the current preview has no picture although one was attempted.
   String? _pictureNote;
   bool _loading = true;
@@ -106,6 +134,7 @@ class _MealFlowState extends State<MealFlow> {
   void dispose() {
     _requestVersion++;
     _slowTimer?.cancel();
+    _pictureTicker?.cancel();
     _headingFocus.dispose();
     _scroll.dispose();
     if (_ownsApi) _api.close();
@@ -169,7 +198,12 @@ class _MealFlowState extends State<MealFlow> {
     });
   }
 
-  Future<void> _submit() async {
+  /// Key of a saved picture: the meal and the changes it shows.
+  String _pictureKey(String dishId) =>
+      '$dishId-${(List.of(_picturable)..sort()).join('+')}';
+
+  /// [fresh] skips a saved picture and asks the server for a new one.
+  Future<void> _submit({bool fresh = false}) async {
     if (_submitting) return;
     final dish = _dish;
     final rules = _catalog?.selection ?? const SelectionRules();
@@ -209,21 +243,40 @@ class _MealFlowState extends State<MealFlow> {
         );
       }
       PhotoEditResult? picture;
+      DateTime? savedAt;
       String? pictureNote;
       if (result.gpuArtifact == null && _picturable.isNotEmpty) {
         // The summary is ready; a missing picture never blocks it.
-        try {
-          final asset = await rootBundle.load('assets/meals/${dish.id}.jpg');
-          picture = await _api.editPhoto(
-            changeIds: _picturable,
-            imagePng: await squarePng(asset.buffer.asUint8List()),
-          );
-        } catch (error) {
-          pictureNote = error is ApiException && error.code == 'rice_not_found'
-              ? 'This meal photo shows no rice to change, so there is no '
-                    'picture. Your request is summarised below.'
-              : 'A picture could not be made this time. Your request is '
-                    'summarised below.';
+        final key = _pictureKey(dish.id);
+        final saved = await _pictures.read(key);
+        if (saved != null && !fresh) {
+          picture = saved.result;
+          savedAt = saved.madeAt;
+        } else {
+          _startPictureWait();
+          try {
+            final asset = await rootBundle.load('assets/meals/${dish.id}.jpg');
+            picture = await _api.editPhoto(
+              changeIds: _picturable,
+              imagePng: await squarePng(asset.buffer.asUint8List()),
+            );
+            await _pictures.write(key, SavedPicture(picture, DateTime.now()));
+          } catch (error) {
+            if (saved != null) {
+              // A new one could not be made: keep showing the earlier one.
+              picture = saved.result;
+              savedAt = saved.madeAt;
+            } else {
+              pictureNote =
+                  error is ApiException && error.code == 'rice_not_found'
+                  ? 'This meal photo shows no rice to change, so there is no '
+                        'picture. Your request is summarised below.'
+                  : 'A picture could not be made this time. Your request is '
+                        'summarised below.';
+            }
+          } finally {
+            _stopPictureWait();
+          }
         }
         if (!mounted || version != _requestVersion) return;
       }
@@ -238,6 +291,7 @@ class _MealFlowState extends State<MealFlow> {
                 ),
               );
         _pictureNote = pictureNote;
+        _pictureSavedAt = savedAt;
         _submitting = false;
         _step = 2;
       });
@@ -249,6 +303,54 @@ class _MealFlowState extends State<MealFlow> {
         _submitting = false;
       });
     }
+  }
+
+  void _startPictureWait() {
+    _pictureWait
+      ..reset()
+      ..start();
+    _pictureTicker?.cancel();
+    _pictureTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    if (mounted) setState(() => _makingPicture = true);
+  }
+
+  void _stopPictureWait() {
+    _pictureTicker?.cancel();
+    _pictureTicker = null;
+    _pictureWait.stop();
+    if (mounted) setState(() => _makingPicture = false);
+  }
+
+  /// Progress while a meal picture is being made (about 4–25 seconds).
+  Widget _pictureProgress() {
+    final seconds = _pictureWait.elapsed.inSeconds;
+    final typical = _picturable.length > 1 ? 20 : 12;
+    return Semantics(
+      liveRegion: true,
+      label: 'Making your picture, $seconds seconds so far',
+      child: Column(
+        key: const Key('picture-progress'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: photoEditProgress(seconds, typical),
+              minHeight: 10,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Making your picture · $seconds s so far (usually about '
+            '$typical s). The bar is an estimate.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
   }
 
   /// The chosen changes a picture can show, when the server finds the rice
@@ -289,7 +391,7 @@ class _MealFlowState extends State<MealFlow> {
               _catalog != null &&
               _pinAction &&
               _step > 0)
-            PinnedActionBar(child: _primaryAction()),
+            PinnedActionBar(child: _actionWithProgress()),
           _tabBar(),
         ],
       ),
@@ -423,7 +525,7 @@ class _MealFlowState extends State<MealFlow> {
                               ..._showPreview(),
                             if (!_pinAction && _step > 0) ...[
                               const SizedBox(height: 24),
-                              _primaryAction(),
+                              _actionWithProgress(),
                             ],
                           ],
                           const SizedBox(height: 24),
@@ -506,6 +608,14 @@ class _MealFlowState extends State<MealFlow> {
     });
     _transitionToStep();
   }
+
+  Widget _actionWithProgress() => _makingPicture && _step == 1
+      ? Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [_pictureProgress(), _primaryAction()],
+        )
+      : _primaryAction();
 
   Widget _primaryAction() => _step == 1
       ? AppPrimaryButton(
@@ -1021,6 +1131,25 @@ class _MealFlowState extends State<MealFlow> {
     ];
   }
 
+  static String _formatMade(DateTime t) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.day} ${months[t.month - 1]} at ${two(t.hour)}:${two(t.minute)}';
+  }
+
   /// The review step when the meal's reference photo was edited for real.
   List<Widget> _showPicture(MealPreview preview, PhotoEditResult picture) {
     final shown = picture.artifact;
@@ -1046,18 +1175,25 @@ class _MealFlowState extends State<MealFlow> {
       const SizedBox(height: 16),
       EditVerdict(artifact: shown),
       const SizedBox(height: 12),
-      ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: AspectRatio(
-          aspectRatio: 1,
-          child: Image.memory(
-            _pictureBytes!,
-            key: const Key('meal-picture'),
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            semanticLabel: shown.generatedLabel,
-          ),
+      BeforeAfterSlider(
+        before: Image.asset(
+          'assets/meals/${preview.dish.id}.jpg',
+          fit: BoxFit.cover,
         ),
+        after: Image.memory(
+          _pictureBytes!,
+          key: const Key('meal-picture'),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        ),
+        afterLabel: shown.generatedLabel,
+        afterTag: shown.checkerPassed ? 'After' : 'Attempted edit',
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Drag across the photo to compare. Before: the reference photo, '
+        'unchanged.',
+        style: Theme.of(context).textTheme.bodyMedium,
       ),
       const SizedBox(height: 10),
       Text(
@@ -1065,21 +1201,22 @@ class _MealFlowState extends State<MealFlow> {
         key: const Key('preview-disclosure'),
         style: Theme.of(context).textTheme.bodyMedium,
       ),
-      const SizedBox(height: 20),
-      Text('Before', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 6),
-      ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: AspectRatio(
-          aspectRatio: 2.1,
-          child: MealArtwork(dish: preview.dish),
+      if (_pictureSavedAt != null) ...[
+        const SizedBox(height: 10),
+        NoticeCard(
+          'Saved picture, made on ${_formatMade(_pictureSavedAt!)} by the same '
+          'method. Shown again without asking the server.',
+          key: const Key('picture-saved'),
         ),
-      ),
-      const SizedBox(height: 6),
-      Text(
-        'Reference photo · Unchanged',
-        style: Theme.of(context).textTheme.bodyMedium,
-      ),
+        TextButton(
+          key: const Key('picture-new'),
+          onPressed: _submitting ? null : () => _submit(fresh: true),
+          child: Text(
+            _submitting ? 'Making a new picture…' : 'Make a new picture',
+          ),
+        ),
+        if (_makingPicture) _pictureProgress(),
+      ],
       const SizedBox(height: 20),
       if (notShown.isNotEmpty) ...[
         NoticeCard(

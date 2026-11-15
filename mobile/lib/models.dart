@@ -232,6 +232,13 @@ class EditTarget {
     label: json['label'] as String,
     description: json['description'] as String,
   );
+
+  /// The JSON form [EditTarget.fromJson] reads.
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'label': label,
+    'description': description,
+  };
 }
 
 /// Provenance and image payload returned by the private Tailscale GPU worker.
@@ -275,6 +282,18 @@ class GpuArtifact {
   final String generatedLabel;
 
   /// Validates and decodes a [GpuArtifact] from `gpu_artifact` JSON.
+  /// The JSON form [GpuArtifact.fromJson] reads.
+  Map<String, dynamic> toJson() => {
+    'provider': provider,
+    'model': model,
+    'prompt_id': promptId,
+    'seed': seed,
+    'attempts': attempts,
+    'checker_passed': checkerPassed,
+    'image_data_url': imageDataUrl,
+    'generated_label': generatedLabel,
+  };
+
   factory GpuArtifact.fromJson(Map<String, dynamic> json) {
     if (json
         case {
@@ -457,4 +476,12 @@ class PhotoEditResult {
     }
     throw const FormatException('Invalid photo edit response.');
   }
+
+  /// The JSON form [PhotoEditResult.fromJson] reads.
+  Map<String, dynamic> toJson() => {
+    'schema_version': 1,
+    'edit_target': editTarget.toJson(),
+    'notices': notices,
+    'gpu_artifact': artifact.toJson(),
+  };
 }
